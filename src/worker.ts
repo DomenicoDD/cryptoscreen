@@ -54,7 +54,7 @@ type ConsumeMessageRow = {
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-FEa6ldalhJx3VzFMb+/E3JAH3Ryb4C1E34nM9eA4Dmk='; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-jQ7CUr6PihHw53VP8zk6qFauAKoe7HjOv6gHMqkAvmg='; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -110,7 +110,7 @@ export default {
       }
 
       if (/^\/m\/[^/]+$/.test(url.pathname)) {
-        return htmlResponse(messagePage(url, env));
+        return htmlResponse(messagePage(url, env), 200, "no-store");
       }
 
       if (url.pathname === "/" || url.pathname === "") {
@@ -482,12 +482,12 @@ function jsonResponse(data: unknown, status = 200, extraHeaders: HeadersInit = {
   });
 }
 
-function htmlResponse(body: string, status = 200): Response {
+function htmlResponse(body: string, status = 200, cacheControl = "public, max-age=300"): Response {
   return new Response(body, {
     status,
     headers: {
       ...securityHeaders,
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": cacheControl,
       "Content-Type": "text/html; charset=utf-8"
     }
   });
@@ -627,6 +627,9 @@ function messagePage(url: URL, env: Env): string {
         </div>
         <p class="hint">
           On iPhone, this button uses the same universal link. If the app is installed, iOS opens the app. If not, Safari can offer the App Clip through the banner.
+        </p>
+        <p class="browser-warning" data-safari-warning hidden>
+          Open this link in Safari to see the App Clip prompt. Other iOS browsers may only show this web fallback.
         </p>
       </section>
     `,
@@ -1011,6 +1014,19 @@ function pageShell(title: string, env: Env, content: string, appArgument?: strin
         line-height: 1.5;
         margin-top: 14px;
       }
+      .browser-warning {
+        border: 1px solid oklch(78% 0.15 77 / 0.38);
+        border-radius: 8px;
+        background: oklch(78% 0.15 77 / 0.1);
+        color: var(--warn);
+        font-size: 13px;
+        line-height: 1.5;
+        margin-top: 14px;
+        padding: 12px 13px;
+      }
+      .browser-warning[hidden] {
+        display: none;
+      }
       footer {
         border-top: 1px solid var(--line);
         color: var(--muted);
@@ -1133,6 +1149,11 @@ function fragmentForwardingScript(): string {
   window.addEventListener("DOMContentLoaded", () => {
     const openMessage = document.querySelector("[data-open-message]");
     if (openMessage) openMessage.href = currentUrl;
+    const userAgent = navigator.userAgent || "";
+    const isIOS = /iPad|iPhone|iPod/.test(userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isSafari = /Safari/.test(userAgent) && !/(CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo)/.test(userAgent);
+    const safariWarning = document.querySelector("[data-safari-warning]");
+    if (safariWarning && isIOS && !isSafari) safariWarning.hidden = false;
   });
 })();
 </script>`;
