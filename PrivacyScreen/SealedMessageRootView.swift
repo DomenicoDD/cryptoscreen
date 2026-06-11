@@ -481,7 +481,7 @@ private struct SecureReaderSessionView: View {
 
   var body: some View {
     CaptureShield {
-      ZStack(alignment: .topTrailing) {
+      ZStack(alignment: .bottomLeading) {
         PrivacyReaderView(message: message)
 
         Button {
@@ -495,8 +495,8 @@ private struct SecureReaderSessionView: View {
             .background(.ultraThinMaterial, in: Circle())
             .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
         }
-        .padding(.top, 14)
-        .padding(.trailing, 14)
+        .padding(.leading, 24)
+        .padding(.bottom, 16)
         .accessibilityLabel("Close message")
       }
       .onDisappear {
