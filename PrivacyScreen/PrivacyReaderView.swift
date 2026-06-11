@@ -31,8 +31,16 @@ struct PrivacyReaderView: View {
 
   var body: some View {
     GeometryReader { proxy in
-      let revealTop = max(proxy.safeAreaInsets.top + 8 - 30, 28)
-      let revealHeight = proxy.size.height * 0.26
+      let touchButtonTop = proxy.safeAreaInsets.top + 8
+      let touchButtonSize = CGSize(width: min(proxy.size.width - 156, 176), height: 50)
+      let touchZone = CGRect(
+        x: (proxy.size.width - touchButtonSize.width) / 2,
+        y: touchButtonTop,
+        width: touchButtonSize.width,
+        height: touchButtonSize.height
+      )
+      let revealTop = touchZone.maxY + 12
+      let revealHeight = proxy.size.height * 0.22
       let revealZone = CGRect(x: 0, y: revealTop, width: proxy.size.width, height: revealHeight)
       let textWidth = proxy.size.width - 40
       let lines = TextLineWrapper.wrap(message, width: textWidth, fontSize: fontSize)
@@ -67,19 +75,21 @@ struct PrivacyReaderView: View {
             }
           }
           .padding(.horizontal, 20)
-          .padding(.top, revealTop + 16)
+          .padding(.top, revealTop + 8)
           .padding(.bottom, proxy.safeAreaInsets.bottom + 116)
         }
         .onPreferenceChange(LineFramePreferenceKey.self) { frames in
           updateRevealWindow(frames: frames, revealZone: revealZone)
         }
 
-        RevealWindowOverlay(topOffset: revealTop, height: revealHeight, isActive: revealActive)
+        RevealTouchTestButton(
+          proximitySensor: proximitySensor,
+          isRevealActive: revealActive,
+          frame: touchZone
+        )
 
         ReaderChrome(
-          proximitySensor: proximitySensor,
-          fontSize: $fontSize,
-          isRevealActive: revealActive
+          fontSize: $fontSize
         )
         .padding(.bottom, proxy.safeAreaInsets.bottom + 16)
         .padding(.horizontal, 16)
@@ -89,7 +99,7 @@ struct PrivacyReaderView: View {
       .simultaneousGesture(
         DragGesture(minimumDistance: 0, coordinateSpace: .named("readerScreen"))
           .onChanged { value in
-            proximitySensor.setScreenCoverActive(revealZone.contains(value.location))
+            proximitySensor.setScreenCoverActive(touchZone.contains(value.location))
           }
           .onEnded { _ in
             proximitySensor.setScreenCoverActive(false)
@@ -181,8 +191,20 @@ private struct ScrambleLineText: View {
     CipherText.hiddenText(for: text, seed: lineID)
   }
 
+  private var visibleText: String {
+    guard isRevealed else {
+      return displayedText.isEmpty ? hiddenText : displayedText
+    }
+
+    if displayedText.isEmpty || displayedText == hiddenText {
+      return text
+    }
+
+    return displayedText
+  }
+
   var body: some View {
-    Text(displayedText.isEmpty ? hiddenText : displayedText)
+    Text(visibleText)
       .font(.system(size: fontSize, weight: isActive ? .semibold : .regular, design: .monospaced))
       .foregroundStyle(isRevealed ? Color(red: 0.965, green: 0.965, blue: 0.92) : Color.white.opacity(0.34))
       .lineLimit(1)
@@ -245,28 +267,13 @@ private struct ScrambleLineText: View {
 }
 
 private struct ReaderChrome: View {
-  @ObservedObject var proximitySensor: ProximitySensor
   @Binding var fontSize: CGFloat
-  let isRevealActive: Bool
 
   var body: some View {
     VStack {
       Spacer()
 
       HStack(alignment: .bottom) {
-        Button {
-          proximitySensor.isManualRevealEnabled.toggle()
-          Haptics.buttonTap()
-        } label: {
-          Image(systemName: proximitySensor.isManualRevealEnabled ? "hand.raised.fill" : "hand.raised")
-            .font(.system(size: 17, weight: .semibold))
-            .frame(width: 42, height: 42)
-            .foregroundStyle(isRevealActive ? Color(red: 0.45, green: 1.0, blue: 0.7) : Color(red: 0.965, green: 0.965, blue: 0.92))
-            .background(.ultraThinMaterial, in: Circle())
-            .overlay(Circle().stroke(Color.white.opacity(isRevealActive ? 0.28 : 0.12), lineWidth: 1))
-        }
-        .accessibilityLabel("Toggle reveal")
-
         Spacer()
 
         HStack(spacing: 6) {
@@ -306,24 +313,30 @@ private struct ReaderChrome: View {
   }
 }
 
-private struct RevealWindowOverlay: View {
-  let topOffset: CGFloat
-  let height: CGFloat
-  let isActive: Bool
+private struct RevealTouchTestButton: View {
+  @ObservedObject var proximitySensor: ProximitySensor
+  let isRevealActive: Bool
+  let frame: CGRect
 
   var body: some View {
-    VStack(spacing: 0) {
-      Color.clear
-        .frame(height: topOffset)
-
-      Rectangle()
-        .fill(Color.white.opacity(isActive ? 0.055 : 0.012))
-        .frame(height: height)
-
-      Spacer(minLength: 0)
+    Button {
+      proximitySensor.isManualRevealEnabled.toggle()
+      Haptics.buttonTap()
+    } label: {
+      Image(systemName: proximitySensor.isManualRevealEnabled ? "hand.raised.fill" : "hand.raised")
+        .font(.system(size: 19, weight: .semibold))
+        .frame(width: frame.width, height: frame.height)
+        .foregroundStyle(isRevealActive ? Color(red: 0.45, green: 1.0, blue: 0.7) : Color(red: 0.965, green: 0.965, blue: 0.92))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+          RoundedRectangle(cornerRadius: 8)
+            .stroke(Color.white.opacity(isRevealActive ? 0.26 : 0.13), lineWidth: 1)
+        )
     }
-    .allowsHitTesting(false)
-    .animation(.easeInOut(duration: 0.18), value: isActive)
+    .buttonStyle(.plain)
+    .position(x: frame.midX, y: frame.midY)
+    .animation(.easeInOut(duration: 0.18), value: isRevealActive)
+    .accessibilityLabel("Reveal test area")
   }
 }
 
