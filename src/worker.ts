@@ -54,7 +54,7 @@ type ConsumeMessageRow = {
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-FEa6ldalhJx3VzFMb+/E3JAH3Ryb4C1E34nM9eA4Dmk='; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -604,6 +604,8 @@ function homePage(env: Env): string {
 
 function messagePage(url: URL, env: Env): string {
   const messageID = escapeHtml(url.pathname.split("/").pop() ?? "");
+  const messageUrl = messageUrlWithoutFragment(url, env);
+  const links = siteLinks(env);
 
   return pageShell(
     "Open sealed message",
@@ -619,11 +621,16 @@ function messagePage(url: URL, env: Env): string {
           The decryption secret belongs in the URL fragment after <code>#s=</code>. Browsers do not send that fragment to this server.
         </p>
         <div class="actions">
-          <a class="button primary" href="/">About cryptoscreen</a>
+          <a class="button primary" data-open-message href="${escapeAttribute(messageUrl)}">Open message</a>
+          <a class="button" href="${escapeAttribute(links.testFlightUrl)}">Join TestFlight</a>
           <a class="button" href="/support">Support</a>
         </div>
+        <p class="hint">
+          On iPhone, this button uses the same universal link. If the app is installed, iOS opens the app. If not, Safari can offer the App Clip through the banner.
+        </p>
       </section>
-    `
+    `,
+    messageUrl
   );
 }
 
@@ -687,10 +694,8 @@ function notFoundPage(env: Env): string {
   );
 }
 
-function pageShell(title: string, env: Env, content: string): string {
+function pageShell(title: string, env: Env, content: string, appArgument?: string): string {
   const escapedTitle = escapeHtml(title);
-  const appID = escapeHtml(env.APPLE_APP_ID);
-  const clipID = escapeHtml(env.APP_CLIP_BUNDLE_ID);
   const description = "cryptoscreen seals one-time encrypted messages for private reading on iPhone.";
   const links = siteLinks(env);
 
@@ -699,7 +704,8 @@ function pageShell(title: string, env: Env, content: string): string {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="apple-itunes-app" content="app-id=${appID}, app-clip-bundle-id=${clipID}">
+    <meta name="apple-itunes-app" content="${escapeAttribute(smartBannerContent(env, appArgument))}">
+    ${appArgument ? fragmentForwardingScript() : ""}
     <meta name="description" content="${escapeAttribute(description)}">
     <meta name="theme-color" content="#08100b">
     <meta property="og:title" content="${escapedTitle}">
@@ -999,6 +1005,12 @@ function pageShell(title: string, env: Env, content: string): string {
         margin-top: 18px;
         padding: 14px;
       }
+      .hint {
+        color: var(--quiet);
+        font-size: 13px;
+        line-height: 1.5;
+        margin-top: 14px;
+      }
       footer {
         border-top: 1px solid var(--line);
         color: var(--muted);
@@ -1075,10 +1087,62 @@ function pageShell(title: string, env: Env, content: string): string {
 </html>`;
 }
 
+function smartBannerContent(env: Env, appArgument?: string): string {
+  const content = [`app-id=${env.APPLE_APP_ID}`, `app-clip-bundle-id=${env.APP_CLIP_BUNDLE_ID}`];
+
+  if (appArgument) {
+    content.push(`app-argument=${appArgument}`);
+  }
+
+  return content.join(", ");
+}
+
+function messageUrlWithoutFragment(url: URL, env: Env): string {
+  const baseUrl = siteBaseUrl(env);
+  return `${baseUrl.origin}${url.pathname}`;
+}
+
+function siteBaseUrl(env: Env): URL {
+  const vars = env as unknown as Record<string, string | undefined>;
+
+  try {
+    const candidate = new URL(vars.APP_BASE_URL ?? "https://cryptoscreen.app");
+    if (candidate.protocol === "https:") {
+      return candidate;
+    }
+  } catch {
+    // Fall through to the production domain.
+  }
+
+  return new URL("https://cryptoscreen.app");
+}
+
+function fragmentForwardingScript(): string {
+  return `<script>
+(() => {
+  const currentUrl = window.location.href;
+  const banner = document.querySelector('meta[name="apple-itunes-app"]');
+  if (banner) {
+    const parts = (banner.getAttribute("content") || "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part && !part.startsWith("app-argument="));
+    parts.push("app-argument=" + currentUrl);
+    banner.setAttribute("content", parts.join(", "));
+  }
+  window.addEventListener("DOMContentLoaded", () => {
+    const openMessage = document.querySelector("[data-open-message]");
+    if (openMessage) openMessage.href = currentUrl;
+  });
+})();
+</script>`;
+}
+
 function siteLinks(env: Env): {
   appStoreUrl: string;
   githubUrl: string;
   supportEmail: string;
+  testFlightUrl: string;
   xUrl: string;
 } {
   const vars = env as unknown as Record<string, string | undefined>;
@@ -1087,6 +1151,7 @@ function siteLinks(env: Env): {
     appStoreUrl: externalUrl(`https://apps.apple.com/app/id${env.APPLE_APP_ID}`),
     githubUrl: externalUrl(vars.GITHUB_REPOSITORY_URL ?? "https://github.com/DomenicoDD/cryptoscreen"),
     supportEmail: emailAddress(vars.SUPPORT_EMAIL ?? "domenico@cryptoscreen.app"),
+    testFlightUrl: externalUrl(vars.TESTFLIGHT_PUBLIC_URL ?? "https://testflight.apple.com/join/ykqncUF5"),
     xUrl: externalUrl(vars.X_PROFILE_URL ?? "https://x.com/DomenicoDD")
   };
 }
