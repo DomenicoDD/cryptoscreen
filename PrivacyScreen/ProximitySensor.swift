@@ -1,4 +1,3 @@
-import Combine
 import UIKit
 
 @MainActor
@@ -7,27 +6,27 @@ final class ProximitySensor: ObservableObject {
   @Published private(set) var isMonitoringAvailable = false
   @Published var isManualRevealEnabled = false
 
-  private var proximityCancellable: AnyCancellable?
-
   var isRevealActive: Bool {
     isCovered || isManualRevealEnabled
   }
 
   func start() {
-    UIDevice.current.isProximityMonitoringEnabled = true
-    isMonitoringAvailable = UIDevice.current.isProximityMonitoringEnabled
-    isCovered = UIDevice.current.proximityState
+    // iOS blanks the display when hardware proximity monitoring is active and covered.
+    // The reveal gesture uses touch coverage instead so the screen stays on.
+    UIDevice.current.isProximityMonitoringEnabled = false
+    isMonitoringAvailable = false
+    isCovered = false
+  }
 
-    proximityCancellable = NotificationCenter.default
-      .publisher(for: UIDevice.proximityStateDidChangeNotification)
-      .receive(on: RunLoop.main)
-      .sink { [weak self] _ in
-        self?.isCovered = UIDevice.current.proximityState
-      }
+  func setScreenCoverActive(_ isActive: Bool) {
+    guard isCovered != isActive else {
+      return
+    }
+
+    isCovered = isActive
   }
 
   func stop() {
-    proximityCancellable = nil
     isCovered = false
     UIDevice.current.isProximityMonitoringEnabled = false
   }

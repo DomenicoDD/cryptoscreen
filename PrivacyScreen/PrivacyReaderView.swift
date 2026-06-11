@@ -86,10 +86,21 @@ struct PrivacyReaderView: View {
       }
       .coordinateSpace(name: "readerScreen")
       .textSelection(.disabled)
+      .simultaneousGesture(
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("readerScreen"))
+          .onChanged { value in
+            proximitySensor.setScreenCoverActive(revealZone.contains(value.location))
+          }
+          .onEnded { _ in
+            proximitySensor.setScreenCoverActive(false)
+          }
+      )
       .onAppear {
+        UIApplication.shared.isIdleTimerDisabled = true
         proximitySensor.start()
       }
       .onDisappear {
+        UIApplication.shared.isIdleTimerDisabled = false
         proximitySensor.stop()
         revealDelayTask?.cancel()
       }

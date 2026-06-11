@@ -188,18 +188,7 @@ private struct ComposeSealedMessageView: View {
         Text("Six-digit PIN")
           .formLabelStyle()
 
-        SecureField("PIN", text: $pin)
-          .keyboardType(.numberPad)
-          .textContentType(.oneTimeCode)
-          .font(.system(size: 24, weight: .semibold, design: .monospaced))
-          .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-          .padding(14)
-          .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
-          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
-          .privacySensitive()
-          .onChange(of: pin) { _, newValue in
-            pin = SealedMessageCrypto.normalizePIN(newValue)
-          }
+        PinBoxEntry(pin: $pin)
       }
 
       Button {
@@ -322,33 +311,39 @@ private struct OpenSealedMessageView: View {
         Text("Message link")
           .formLabelStyle()
 
-        TextField("https://cryptoscreen.app/m/...", text: $link)
-          .keyboardType(.URL)
-          .textInputAutocapitalization(.never)
-          .autocorrectionDisabled()
-          .font(.system(size: 14, weight: .medium, design: .monospaced))
-          .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-          .padding(14)
-          .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
-          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+        HStack(spacing: 8) {
+          TextField("https://cryptoscreen.app/m/...", text: $link)
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .font(.system(size: 14, weight: .medium, design: .monospaced))
+            .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+
+          Button {
+            link = ""
+            softHaptic()
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+              .font(.system(size: 18, weight: .semibold))
+              .foregroundStyle(Color.white.opacity(link.isEmpty ? 0.20 : 0.58))
+              .frame(width: 30, height: 30)
+          }
+          .buttonStyle(.plain)
+          .disabled(link.isEmpty)
+          .accessibilityLabel("Clear message link")
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 8)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
       }
 
       VStack(alignment: .leading, spacing: 10) {
         Text("PIN")
           .formLabelStyle()
 
-        SecureField("Six digits", text: $pin)
-          .keyboardType(.numberPad)
-          .textContentType(.oneTimeCode)
-          .font(.system(size: 24, weight: .semibold, design: .monospaced))
-          .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-          .padding(14)
-          .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
-          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
-          .privacySensitive()
-          .onChange(of: pin) { _, newValue in
-            pin = SealedMessageCrypto.normalizePIN(newValue)
-          }
+        PinBoxEntry(pin: $pin)
       }
 
       Button {
@@ -441,6 +436,86 @@ private struct OpenSealedMessageView: View {
       status = "Could not reach cryptoscreen.app."
       statusIcon = "wifi.exclamationmark"
       statusTint = Color(red: 1.0, green: 0.68, blue: 0.38)
+    }
+  }
+}
+
+private struct PinBoxEntry: View {
+  @Binding var pin: String
+  @FocusState private var focusedIndex: Int?
+
+  private let boxCount = SealedMessageCrypto.pinLength
+
+  var body: some View {
+    HStack(spacing: 8) {
+      ForEach(0..<boxCount, id: \.self) { index in
+        TextField("", text: digitBinding(for: index))
+          .keyboardType(.numberPad)
+          .textContentType(index == 0 ? .oneTimeCode : nil)
+          .textInputAutocapitalization(.never)
+          .autocorrectionDisabled()
+          .multilineTextAlignment(.center)
+          .font(.system(size: 22, weight: .semibold, design: .monospaced))
+          .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+          .frame(maxWidth: .infinity, minHeight: 52)
+          .background(Color.white.opacity(focusedIndex == index ? 0.105 : 0.065), in: RoundedRectangle(cornerRadius: 8))
+          .overlay(
+            RoundedRectangle(cornerRadius: 8)
+              .stroke(Color.white.opacity(focusedIndex == index ? 0.24 : 0.10), lineWidth: 1)
+          )
+          .focused($focusedIndex, equals: index)
+          .privacySensitive()
+          .accessibilityLabel("PIN digit \(index + 1)")
+      }
+    }
+    .onAppear {
+      pin = SealedMessageCrypto.normalizePIN(pin)
+    }
+    .onChange(of: pin) { _, newValue in
+      let normalized = SealedMessageCrypto.normalizePIN(newValue)
+      if normalized != newValue {
+        pin = normalized
+      }
+    }
+  }
+
+  private func digitBinding(for index: Int) -> Binding<String> {
+    Binding {
+      let digits = Array(pin)
+      guard digits.indices.contains(index) else {
+        return ""
+      }
+
+      return String(digits[index])
+    } set: { newValue in
+      let inputDigits = newValue.filter(\.isNumber)
+      var digits = Array(pin).map(String.init)
+
+      while digits.count < boxCount {
+        digits.append("")
+      }
+
+      guard !inputDigits.isEmpty else {
+        digits[index] = ""
+        pin = SealedMessageCrypto.normalizePIN(digits.joined())
+
+        if index > 0 {
+          focusedIndex = index - 1
+        }
+
+        return
+      }
+
+      let input = Array(inputDigits.prefix(boxCount - index)).map(String.init)
+
+      for offset in input.indices {
+        digits[index + offset] = input[offset]
+      }
+
+      pin = SealedMessageCrypto.normalizePIN(digits.joined())
+
+      let nextIndex = index + input.count
+      focusedIndex = nextIndex < boxCount ? nextIndex : nil
     }
   }
 }
