@@ -3,6 +3,9 @@
   "name": "cryptoscreen-dev",
   "account_id": "<YOUR_CLOUDFLARE_ACCOUNT_ID>",
   "main": "src/worker.ts",
+  "assets": {
+    "directory": "./public"
+  },
   "compatibility_date": "2026-06-11",
   "compatibility_flags": ["nodejs_compat"],
   "routes": [
@@ -31,7 +34,7 @@
     "APP_CLIP_BUNDLE_ID": "com.example.cryptoscreen.Clip",
     "GITHUB_REPOSITORY_URL": "https://github.com/DomenicoDD/cryptoscreen",
     "X_PROFILE_URL": "https://x.com/DomenicoDD",
-    "SUPPORT_EMAIL": "domenico.dd@gmail.com"
+    "SUPPORT_EMAIL": "domenico@cryptoscreen.app"
   },
   "secrets": {
     "required": ["DATABASE_URL", "SERVER_PIN_PEPPER"]

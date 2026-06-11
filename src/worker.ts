@@ -8,6 +8,7 @@ const LINK_RETENTION_DAYS = 30;
 const LINK_RETENTION_SECONDS = LINK_RETENTION_DAYS * 24 * 60 * 60;
 const DEFAULT_TTL_SECONDS = LINK_RETENTION_SECONDS;
 const MAX_TTL_SECONDS = LINK_RETENTION_SECONDS;
+const ALPHA_LYRAE_FONT_URL = "/assets/AlphaLyrae-Medium.woff2";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+={0,2}$/;
 const consumeStatuses = ["opened", "wrong_pin", "destroyed", "expired", "unavailable"] as const;
@@ -53,7 +54,7 @@ type ConsumeMessageRow = {
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -377,7 +378,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 function base64ToBase64Url(value: string): string {
-  return value.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return value.replace(/\s+/g, "").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function assertColumn(value: string | null, column: string): asserts value is string {
@@ -706,6 +707,13 @@ function pageShell(title: string, env: Env, content: string): string {
     <meta property="og:type" content="website">
     <title>${escapedTitle}</title>
     <style>
+      @font-face {
+        font-family: "Alpha Lyrae";
+        font-style: normal;
+        font-weight: 500;
+        font-display: swap;
+        src: url("${ALPHA_LYRAE_FONT_URL}") format("woff2");
+      }
       :root {
         color-scheme: dark;
         --bg: oklch(7% 0.014 154);
@@ -730,7 +738,7 @@ function pageShell(title: string, env: Env, content: string): string {
         min-height: 100vh;
         background: var(--bg);
         color: var(--ink);
-        font-family: ui-rounded, "SF Pro Rounded", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         text-rendering: optimizeLegibility;
       }
       a { color: var(--blue); text-underline-offset: 0.18em; }
@@ -749,8 +757,9 @@ function pageShell(title: string, env: Env, content: string): string {
       }
       .brand {
         color: var(--ink);
-        font-size: 17px;
-        font-weight: 700;
+        font-family: "Alpha Lyrae", ui-rounded, "SF Pro Rounded", ui-sans-serif, system-ui, sans-serif;
+        font-size: 18px;
+        font-weight: 500;
         letter-spacing: 0;
         text-decoration: none;
       }
@@ -798,21 +807,30 @@ function pageShell(title: string, env: Env, content: string): string {
         text-transform: uppercase;
       }
       h1 {
+        font-family: "Alpha Lyrae", ui-rounded, "SF Pro Rounded", ui-sans-serif, system-ui, sans-serif;
         font-size: clamp(44px, 11vw, 104px);
+        font-feature-settings: "calt" 1, "liga" 1;
+        font-weight: 500;
         line-height: 0.94;
         letter-spacing: 0;
         margin: 0 0 20px;
       }
       h2 {
         color: var(--ink);
+        font-family: "Alpha Lyrae", ui-rounded, "SF Pro Rounded", ui-sans-serif, system-ui, sans-serif;
         font-size: clamp(26px, 5vw, 48px);
+        font-feature-settings: "calt" 1, "liga" 1;
+        font-weight: 500;
         line-height: 1.02;
         letter-spacing: 0;
         margin: 0;
       }
       h3 {
         color: var(--ink);
+        font-family: "Alpha Lyrae", ui-rounded, "SF Pro Rounded", ui-sans-serif, system-ui, sans-serif;
         font-size: 22px;
+        font-feature-settings: "calt" 1, "liga" 1;
+        font-weight: 500;
         line-height: 1.1;
         margin: 10px 0 8px;
       }
@@ -1068,7 +1086,7 @@ function siteLinks(env: Env): {
   return {
     appStoreUrl: externalUrl(`https://apps.apple.com/app/id${env.APPLE_APP_ID}`),
     githubUrl: externalUrl(vars.GITHUB_REPOSITORY_URL ?? "https://github.com/DomenicoDD/cryptoscreen"),
-    supportEmail: emailAddress(vars.SUPPORT_EMAIL ?? "domenico.dd@gmail.com"),
+    supportEmail: emailAddress(vars.SUPPORT_EMAIL ?? "domenico@cryptoscreen.app"),
     xUrl: externalUrl(vars.X_PROFILE_URL ?? "https://x.com/DomenicoDD")
   };
 }
@@ -1087,7 +1105,7 @@ function externalUrl(value: string): string {
 }
 
 function emailAddress(value: string): string {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : "domenico.dd@gmail.com";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : "domenico@cryptoscreen.app";
 }
 
 function escapeAttribute(value: string): string {
