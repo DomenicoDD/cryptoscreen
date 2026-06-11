@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an improvement to cryptoscreen.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - iOS app
+        - App Clip
+        - Worker API
+        - Database schema
+        - Documentation
+        - Build tooling
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy considerations
+      description: How could this affect plaintext, PINs, links, encryption, attempts, deletion, or user trust?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

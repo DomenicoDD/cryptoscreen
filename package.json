@@ -1,0 +1,21 @@
+{
+  "name": "cryptoscreen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit && wrangler deploy --dry-run",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --port 8787",
+    "types": "wrangler types src/worker-configuration.d.ts"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.19.1"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

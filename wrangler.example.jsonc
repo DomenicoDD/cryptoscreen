@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cryptoscreen-dev",
+  "account_id": "<YOUR_CLOUDFLARE_ACCOUNT_ID>",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    {
+      "pattern": "example.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.example.com",
+      "custom_domain": true
+    }
+  ],
+  "triggers": {
+    "crons": ["17 * * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "APP_BASE_URL": "https://example.com",
+    "APPLE_APP_ID": "<YOUR_APP_STORE_ID>",
+    "APPLE_TEAM_ID": "<YOUR_APPLE_TEAM_ID>",
+    "IOS_BUNDLE_ID": "com.example.cryptoscreen",
+    "APP_CLIP_BUNDLE_ID": "com.example.cryptoscreen.Clip"
+  },
+  "secrets": {
+    "required": ["DATABASE_URL", "SERVER_PIN_PEPPER"]
+  },
+  "keep_vars": true,
+  "send_metrics": false
+}
