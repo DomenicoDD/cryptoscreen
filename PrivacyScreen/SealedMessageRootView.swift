@@ -155,7 +155,7 @@ private struct ComposeSealedMessageView: View {
   let onTestMessage: (CreatedSealedMessage) -> Void
 
   @State private var message = "Meet me by the north entrance after the second bell. Read this once, then let it burn."
-  @State private var pin = "427913"
+  @State private var pin = ""
   @State private var createdMessage: CreatedSealedMessage?
   @State private var errorMessage: String?
   @State private var isCreating = false
@@ -188,7 +188,7 @@ private struct ComposeSealedMessageView: View {
         Text("Six-digit PIN")
           .formLabelStyle()
 
-        PinBoxEntry(pin: $pin)
+        PinEntryField(pin: $pin, placeholder: "PIN", accessibilityLabel: "Create message PIN")
       }
 
       Button {
@@ -343,7 +343,7 @@ private struct OpenSealedMessageView: View {
         Text("PIN")
           .formLabelStyle()
 
-        PinBoxEntry(pin: $pin)
+        PinEntryField(pin: $pin, placeholder: "PIN", accessibilityLabel: "Open message PIN")
       }
 
       Button {
@@ -440,34 +440,25 @@ private struct OpenSealedMessageView: View {
   }
 }
 
-private struct PinBoxEntry: View {
+private struct PinEntryField: View {
   @Binding var pin: String
-  @FocusState private var focusedIndex: Int?
-
-  private let boxCount = SealedMessageCrypto.pinLength
+  let placeholder: String
+  let accessibilityLabel: String
 
   var body: some View {
-    HStack(spacing: 8) {
-      ForEach(0..<boxCount, id: \.self) { index in
-        TextField("", text: digitBinding(for: index))
-          .keyboardType(.numberPad)
-          .textContentType(index == 0 ? .oneTimeCode : nil)
-          .textInputAutocapitalization(.never)
-          .autocorrectionDisabled()
-          .multilineTextAlignment(.center)
-          .font(.system(size: 22, weight: .semibold, design: .monospaced))
-          .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-          .frame(maxWidth: .infinity, minHeight: 52)
-          .background(Color.white.opacity(focusedIndex == index ? 0.105 : 0.065), in: RoundedRectangle(cornerRadius: 8))
-          .overlay(
-            RoundedRectangle(cornerRadius: 8)
-              .stroke(Color.white.opacity(focusedIndex == index ? 0.24 : 0.10), lineWidth: 1)
-          )
-          .focused($focusedIndex, equals: index)
-          .privacySensitive()
-          .accessibilityLabel("PIN digit \(index + 1)")
-      }
-    }
+    TextField(placeholder, text: $pin)
+      .keyboardType(.numberPad)
+      .textInputAutocapitalization(.never)
+      .autocorrectionDisabled()
+      .font(.system(size: 22, weight: .semibold, design: .monospaced))
+      .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+      .lineLimit(1)
+      .privacySensitive()
+      .accessibilityLabel(accessibilityLabel)
+      .padding(.horizontal, 14)
+      .frame(maxWidth: .infinity, minHeight: 52)
+      .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
+      .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
     .onAppear {
       pin = SealedMessageCrypto.normalizePIN(pin)
     }
@@ -476,46 +467,6 @@ private struct PinBoxEntry: View {
       if normalized != newValue {
         pin = normalized
       }
-    }
-  }
-
-  private func digitBinding(for index: Int) -> Binding<String> {
-    Binding {
-      let digits = Array(pin)
-      guard digits.indices.contains(index) else {
-        return ""
-      }
-
-      return String(digits[index])
-    } set: { newValue in
-      let inputDigits = newValue.filter(\.isNumber)
-      var digits = Array(pin).map(String.init)
-
-      while digits.count < boxCount {
-        digits.append("")
-      }
-
-      guard !inputDigits.isEmpty else {
-        digits[index] = ""
-        pin = SealedMessageCrypto.normalizePIN(digits.joined())
-
-        if index > 0 {
-          focusedIndex = index - 1
-        }
-
-        return
-      }
-
-      let input = Array(inputDigits.prefix(boxCount - index)).map(String.init)
-
-      for offset in input.indices {
-        digits[index + offset] = input[offset]
-      }
-
-      pin = SealedMessageCrypto.normalizePIN(digits.joined())
-
-      let nextIndex = index + input.count
-      focusedIndex = nextIndex < boxCount ? nextIndex : nil
     }
   }
 }
