@@ -297,7 +297,7 @@ extension Data {
   }
 
   init?(base64URLEncoded value: String) {
-    var base64 = value
+    var base64 = String(value.filter { !$0.isWhitespace })
       .replacingOccurrences(of: "-", with: "+")
       .replacingOccurrences(of: "_", with: "/")
 

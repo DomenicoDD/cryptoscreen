@@ -38,6 +38,7 @@ struct SealedMessageRootView: View {
   @State private var mode: MessageMode = .create
   @State private var openedSession: ReaderSession?
   @State private var incomingLink = ""
+  @State private var incomingPIN = ""
 
   var body: some View {
     CaptureShield {
@@ -53,7 +54,8 @@ struct SealedMessageRootView: View {
             VStack(spacing: 22) {
               OpenSealedMessageView(
                 store: store,
-                initialLink: incomingLink
+                initialLink: incomingLink,
+                initialPIN: incomingPIN
               ) { plaintext in
                 openedSession = ReaderSession(message: plaintext)
               }
@@ -76,13 +78,22 @@ struct SealedMessageRootView: View {
             VStack(spacing: 22) {
               switch mode {
               case .create:
-                ComposeSealedMessageView(store: store) { link in
-                  incomingLink = link.absoluteString
-                }
+                ComposeSealedMessageView(
+                  store: store,
+                  onCreatedLink: { link in
+                    incomingLink = link.absoluteString
+                  },
+                  onTestMessage: { message in
+                    incomingLink = message.link.absoluteString
+                    incomingPIN = message.pin
+                    mode = .open
+                  }
+                )
               case .open:
                 OpenSealedMessageView(
                   store: store,
-                  initialLink: incomingLink
+                  initialLink: incomingLink,
+                  initialPIN: incomingPIN
                 ) { plaintext in
                   openedSession = ReaderSession(message: plaintext)
                 }
@@ -101,6 +112,7 @@ struct SealedMessageRootView: View {
     }
     .onOpenURL { url in
       incomingLink = url.absoluteString
+      incomingPIN = ""
       mode = .open
     }
   }
@@ -140,6 +152,7 @@ private struct HeaderView: View {
 private struct ComposeSealedMessageView: View {
   @ObservedObject var store: SealedMessageStore
   let onCreatedLink: (URL) -> Void
+  let onTestMessage: (CreatedSealedMessage) -> Void
 
   @State private var message = "Meet me by the north entrance after the second bell. Read this once, then let it burn."
   @State private var pin = "427913"
@@ -206,7 +219,7 @@ private struct ComposeSealedMessageView: View {
 
       if let createdMessage {
         CreatedMessagePanel(createdMessage: createdMessage) {
-          onCreatedLink(createdMessage.link)
+          onTestMessage(createdMessage)
         }
       }
     }
@@ -287,6 +300,7 @@ private struct CreatedMessagePanel: View {
 private struct OpenSealedMessageView: View {
   @ObservedObject var store: SealedMessageStore
   let initialLink: String
+  let initialPIN: String
   let onOpen: (String) -> Void
 
   @State private var link = ""
@@ -354,6 +368,9 @@ private struct OpenSealedMessageView: View {
       if !initialLink.isEmpty {
         link = initialLink
       }
+      if !initialPIN.isEmpty {
+        pin = initialPIN
+      }
     }
     .onChange(of: initialLink) { _, newValue in
       guard !newValue.isEmpty else {
@@ -361,6 +378,13 @@ private struct OpenSealedMessageView: View {
       }
 
       link = newValue
+    }
+    .onChange(of: initialPIN) { _, newValue in
+      guard !newValue.isEmpty else {
+        return
+      }
+
+      pin = newValue
     }
   }
 
