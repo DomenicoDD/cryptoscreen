@@ -10,6 +10,7 @@ This document describes the security structure for cryptoscreen. The iOS app per
 - The recipient gets three online PIN attempts.
 - A correct PIN returns ciphertext and deletes the database row.
 - The third wrong PIN deletes the database row.
+- Unopened links expire and are deleted after 30 days.
 - Plaintext is not selectable, copied, logged, cached, or written to disk by the app.
 - The App Clip can consume a message without installing the full app.
 
@@ -206,6 +207,8 @@ POST /api/messages
 ```
 
 Creates a sealed message. Request contains ciphertext, nonce, tag, salt, TTL, and the raw client PIN proof. The Worker stores only `HMAC(SERVER_PIN_PEPPER, pin_proof)`. Response contains the message id.
+
+The production TTL limit is 30 days. Clients may request a shorter TTL, but unopened links cannot be retained longer than 30 days.
 
 ```text
 POST /api/messages/{id}/consume

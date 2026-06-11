@@ -28,7 +28,10 @@
     "APPLE_APP_ID": "<YOUR_APP_STORE_ID>",
     "APPLE_TEAM_ID": "<YOUR_APPLE_TEAM_ID>",
     "IOS_BUNDLE_ID": "com.example.cryptoscreen",
-    "APP_CLIP_BUNDLE_ID": "com.example.cryptoscreen.Clip"
+    "APP_CLIP_BUNDLE_ID": "com.example.cryptoscreen.Clip",
+    "GITHUB_REPOSITORY_URL": "https://github.com/DomenicoDD/cryptoscreen",
+    "X_PROFILE_URL": "https://x.com/DomenicoDD",
+    "SUPPORT_EMAIL": "domenico.dd@gmail.com"
   },
   "secrets": {
     "required": ["DATABASE_URL", "SERVER_PIN_PEPPER"]

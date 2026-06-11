@@ -12,6 +12,7 @@ The current app is intentionally small and native. It encrypts messages on devic
 - Open the message with up to three PIN attempts.
 - Delete the encrypted payload after a correct PIN.
 - Delete the encrypted payload after the third wrong PIN.
+- Delete unopened links after 30 days.
 - Render the plaintext through the privacy reader without selectable text.
 - Redact the app while screen recording, mirroring, app switching, or shortly after screenshot detection.
 - Avoid putting plaintext into logs, clipboard actions, share sheets, or accessibility labels.
@@ -30,6 +31,7 @@ The production model is:
 - The server allows three online PIN attempts.
 - A correct PIN atomically returns ciphertext and deletes the row.
 - The third wrong PIN atomically deletes the row.
+- Unopened links expire and are deleted after 30 days.
 
 Read the detailed design in [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -124,6 +126,14 @@ The Worker serves:
 - `/.well-known/apple-app-site-association`
 - `/api/messages`
 - `/api/messages/<message-id>/consume`
+
+Optional public-site variables:
+
+```text
+GITHUB_REPOSITORY_URL
+X_PROFILE_URL
+SUPPORT_EMAIL
+```
 
 ## Project Structure
 

@@ -67,7 +67,7 @@ enum MessageOpenResult: Equatable {
 enum SealedMessageCrypto {
   static let pinLength = 6
   static let defaultMaxAttempts = 3
-  static let defaultTimeToLive: TimeInterval = 60 * 60 * 24
+  static let defaultTimeToLive: TimeInterval = 60 * 60 * 24 * 30
 
   static func seal(
     plaintext: String,

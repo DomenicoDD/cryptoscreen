@@ -4,8 +4,10 @@ import { neon } from "@neondatabase/serverless";
 
 const MAX_REQUEST_BYTES = 128 * 1024;
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
-const DEFAULT_TTL_SECONDS = 24 * 60 * 60;
-const MAX_TTL_SECONDS = 7 * 24 * 60 * 60;
+const LINK_RETENTION_DAYS = 30;
+const LINK_RETENTION_SECONDS = LINK_RETENTION_DAYS * 24 * 60 * 60;
+const DEFAULT_TTL_SECONDS = LINK_RETENTION_SECONDS;
+const MAX_TTL_SECONDS = LINK_RETENTION_SECONDS;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+={0,2}$/;
 const consumeStatuses = ["opened", "wrong_pin", "destroyed", "expired", "unavailable"] as const;
@@ -314,7 +316,7 @@ function clampTTL(value: number | undefined): number {
 
   const ttl = Math.floor(value);
   if (ttl < 60 || ttl > MAX_TTL_SECONDS) {
-    throw new HttpError(400, "invalid_ttl", "ttlSeconds must be between 60 seconds and 7 days.");
+    throw new HttpError(400, "invalid_ttl", `ttlSeconds must be between 60 seconds and ${LINK_RETENTION_DAYS} days.`);
   }
 
   return ttl;
@@ -516,41 +518,84 @@ function appleAssociation(env: Env): unknown {
 }
 
 function homePage(env: Env): string {
+  const links = siteLinks(env);
+
   return pageShell(
     "cryptoscreen",
     env,
     `
       <section class="hero">
+        <div class="reader-scene" aria-hidden="true">
+          <div class="reader-lines top">
+            <span>U7MZ /FQ6 V$L9 10RQ KQ*8</span>
+            <span>DC1X 8J%4 2QFA PV37 L/0X</span>
+            <span>41KR YN9Q K#L0 M44C VZ1B</span>
+            <span>9AF3 P$8L DQ20 QK17 NQ#M</span>
+            <span>QL50 ZJ6P 8KNR VV1X C0DE</span>
+          </div>
+          <div class="reveal-band">
+            <span>Read one line. Move the page. Let the rest fall back.</span>
+          </div>
+          <div class="reader-lines bottom">
+            <span>J7Y4 K%Q1 H8NN ZPL0 M2VX</span>
+            <span>TY09 DKL4 C#P8 F17M XQ22</span>
+            <span>Q681 41JQ B$Q 1F87 UZ5Q</span>
+            <span>B*F4 %1Z ZS88 W3LZ YN07</span>
+            <span>PX3D LQ12 H#6K TM0Z 88AC</span>
+          </div>
+        </div>
         <div class="hero-copy">
           <p class="eyebrow">One-time private reading</p>
           <h1>cryptoscreen</h1>
           <p class="lede">
-            Create a sealed message, share a link, and let the recipient reveal it once with a six-digit PIN.
-            The server stores ciphertext only.
+            Sealed messages for iPhone. The sender encrypts locally, shares a link and PIN, and the recipient gets one controlled read before the row disappears.
           </p>
           <div class="actions">
-            <a class="button primary" href="/support">Support</a>
-            <a class="button" href="/privacy">Privacy</a>
+            <a class="button primary" href="${escapeAttribute(links.appStoreUrl)}">Open on App Store</a>
+            <a class="button" href="/support">Support</a>
+            <a class="button ghost" href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
+            <a class="button ghost" href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
           </div>
         </div>
-        <div class="phone" aria-hidden="true">
-          <div class="island"></div>
-          <div class="line muted">$ IC%&nbsp;5F/1 DZ4 JL6 DINY17</div>
-          <div class="line revealed">Read one line. Move the page.</div>
-          <div class="line revealed strong">Then let the rest fall back.</div>
-          <div class="line muted">Q681 41JQ B$Q %1F87 $UZ5Q%</div>
-          <div class="line muted">B*F$ %1+ ZS 8{&amp;W3LZ YN/7</div>
+      </section>
+      <section class="section split">
+        <div>
+          <p class="eyebrow">What it does</p>
+          <h2>Messages are sealed before they leave the phone.</h2>
+        </div>
+        <div class="copy-stack">
+          <p>The server stores encrypted bytes, attempt metadata, and an expiry time. It does not receive the plaintext, the link secret, contact lists, or account profiles.</p>
+          <p>A correct PIN consumes the message. The third wrong PIN destroys it. Unused links expire after ${LINK_RETENTION_DAYS} days.</p>
         </div>
       </section>
-      <section class="grid">
+      <section class="section steps" aria-label="How cryptoscreen works">
         <article>
-          <h2>For Apple review</h2>
-          <p>Support, privacy, universal link, and App Clip association endpoints are hosted here.</p>
+          <span>01</span>
+          <h3>Seal</h3>
+          <p>Write the note in the app, choose a six-digit PIN, and encrypt on device.</p>
         </article>
         <article>
-          <h2>Server boundary</h2>
-          <p>The Cloudflare Worker receives encrypted payloads and stores them in Neon until one successful read, expiry, or the third wrong PIN.</p>
+          <span>02</span>
+          <h3>Share</h3>
+          <p>Send the link and PIN through separate channels. The URL fragment keeps the secret out of server logs.</p>
         </article>
+        <article>
+          <span>03</span>
+          <h3>Read once</h3>
+          <p>The reader reveals a narrow window, with capture redaction and no selectable plaintext.</p>
+        </article>
+      </section>
+      <section class="section apple-strip">
+        <div>
+          <p class="eyebrow">Apple review links</p>
+          <h2>Required public endpoints are hosted here.</h2>
+        </div>
+        <nav class="link-list" aria-label="Apple review">
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/support">Support</a>
+          <a href="/.well-known/apple-app-site-association">Apple association</a>
+          <a href="/m/example-message-id">Universal link page</a>
+        </nav>
       </section>
     `
   );
@@ -567,12 +612,15 @@ function messagePage(url: URL, env: Env): string {
         <p class="eyebrow">Sealed message</p>
         <h1>Open in cryptoscreen</h1>
         <p>
-          This link points to message <code>${messageID}</code>. Open it on iPhone with cryptoscreen or the App Clip,
-          then enter the six-digit PIN from the sender.
+          This link points to message <code>${messageID}</code>. Open it on iPhone with cryptoscreen or the App Clip, then enter the six-digit PIN from the sender.
         </p>
         <p class="note">
           The decryption secret belongs in the URL fragment after <code>#s=</code>. Browsers do not send that fragment to this server.
         </p>
+        <div class="actions">
+          <a class="button primary" href="/">About cryptoscreen</a>
+          <a class="button" href="/support">Support</a>
+        </div>
       </section>
     `
   );
@@ -588,7 +636,7 @@ function privacyPage(env: Env): string {
         <h1>cryptoscreen Privacy Policy</h1>
         <p>cryptoscreen is designed for one-time encrypted messages. Message plaintext is encrypted on the sender device before upload and is not stored by the service.</p>
         <h2>What the service stores</h2>
-        <p>The production API stores encrypted message bytes, nonce, tag, salt, expiry time, and failed attempt count. Rows are deleted after a successful read, after the third wrong PIN, or after expiry cleanup.</p>
+        <p>The production API stores encrypted message bytes, nonce, tag, salt, expiry time, and failed attempt count. Rows are deleted after a successful read, after the third wrong PIN, or after expiry cleanup. Unused links expire after ${LINK_RETENTION_DAYS} days.</p>
         <h2>What is not stored</h2>
         <p>The service does not intentionally store plaintext message content, the URL fragment secret, contact lists, or account profiles.</p>
         <h2>Operational data</h2>
@@ -601,6 +649,8 @@ function privacyPage(env: Env): string {
 }
 
 function supportPage(env: Env): string {
+  const links = siteLinks(env);
+
   return pageShell(
     "Support",
     env,
@@ -608,9 +658,13 @@ function supportPage(env: Env): string {
       <section class="panel prose">
         <p class="eyebrow">Support</p>
         <h1>cryptoscreen Support</h1>
-        <p>For help with TestFlight builds, message links, or deletion behavior, contact <a href="mailto:domenico.dd@gmail.com">domenico.dd@gmail.com</a>.</p>
+        <p>For help with TestFlight builds, message links, or deletion behavior, contact <a href="mailto:${escapeAttribute(links.supportEmail)}">${escapeHtml(links.supportEmail)}</a>.</p>
         <h2>Current beta behavior</h2>
-        <p>Messages are intended to delete after one successful read, after the third wrong PIN, or after expiry.</p>
+        <p>Messages delete after one successful read, after the third wrong PIN, or after ${LINK_RETENTION_DAYS} days if never opened.</p>
+        <h2>Project links</h2>
+        <p>
+          Follow development on <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a> or contact the maintainer on <a href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>.
+        </p>
         <h2>Safety note</h2>
         <p>Screenshot and screen recording protections are best-effort iOS protections. They reduce accidental exposure but cannot guarantee protection against external cameras or compromised devices.</p>
       </section>
@@ -636,6 +690,8 @@ function pageShell(title: string, env: Env, content: string): string {
   const escapedTitle = escapeHtml(title);
   const appID = escapeHtml(env.APPLE_APP_ID);
   const clipID = escapeHtml(env.APP_CLIP_BUNDLE_ID);
+  const description = "cryptoscreen seals one-time encrypted messages for private reading on iPhone.";
+  const links = siteLinks(env);
 
   return `<!doctype html>
 <html lang="en">
@@ -643,90 +699,134 @@ function pageShell(title: string, env: Env, content: string): string {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="apple-itunes-app" content="app-id=${appID}, app-clip-bundle-id=${clipID}">
+    <meta name="description" content="${escapeAttribute(description)}">
+    <meta name="theme-color" content="#08100b">
+    <meta property="og:title" content="${escapedTitle}">
+    <meta property="og:description" content="${escapeAttribute(description)}">
+    <meta property="og:type" content="website">
     <title>${escapedTitle}</title>
     <style>
       :root {
         color-scheme: dark;
-        --bg: #090b0a;
-        --panel: #121513;
-        --ink: #f4f1e9;
-        --muted: #9ca49b;
-        --line: rgba(244, 241, 233, 0.12);
-        --accent: #5de39b;
-        --blue: #99c7ff;
+        --bg: oklch(7% 0.014 154);
+        --bg-2: oklch(10.5% 0.018 154);
+        --panel: oklch(14.5% 0.018 154);
+        --panel-2: oklch(18% 0.02 154);
+        --ink: oklch(94% 0.018 96);
+        --soft-ink: oklch(79% 0.02 116);
+        --muted: oklch(67% 0.026 135);
+        --quiet: oklch(50% 0.024 145);
+        --line: oklch(94% 0.018 96 / 0.13);
+        --line-strong: oklch(94% 0.018 96 / 0.22);
+        --accent: oklch(79% 0.21 152);
+        --accent-ink: oklch(16% 0.06 153);
+        --warn: oklch(78% 0.15 77);
+        --blue: oklch(77% 0.1 240);
       }
       * { box-sizing: border-box; }
+      html { background: var(--bg); }
       body {
         margin: 0;
         min-height: 100vh;
         background: var(--bg);
         color: var(--ink);
         font-family: ui-rounded, "SF Pro Rounded", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-rendering: optimizeLegibility;
       }
-      a { color: var(--blue); }
+      a { color: var(--blue); text-underline-offset: 0.18em; }
       code { color: var(--accent); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
       .wrap {
-        width: min(1040px, calc(100% - 32px));
+        width: min(1120px, calc(100% - 32px));
         margin: 0 auto;
-        padding: 28px 0 48px;
+        padding: 18px 0 44px;
       }
       header {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 18px;
-        padding-bottom: 34px;
+        gap: 16px;
+        padding: 10px 0 18px;
       }
       .brand {
         color: var(--ink);
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 700;
+        letter-spacing: 0;
         text-decoration: none;
       }
       nav {
         display: flex;
-        gap: 16px;
+        flex-wrap: wrap;
+        gap: 10px 16px;
         font-size: 14px;
       }
       nav a {
         color: var(--muted);
         text-decoration: none;
       }
+      nav a:hover, .brand:hover { color: var(--ink); }
       .hero {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 330px;
-        gap: 56px;
-        align-items: center;
-        min-height: 68vh;
+        position: relative;
+        min-height: min(760px, calc(100vh - 96px));
+        display: flex;
+        align-items: end;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--bg-2);
+        isolation: isolate;
       }
-      .hero-copy { max-width: 620px; }
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(180deg, oklch(7% 0.014 154 / 0.12), var(--bg) 95%),
+          linear-gradient(90deg, var(--bg) 0%, oklch(7% 0.014 154 / 0.76) 36%, oklch(7% 0.014 154 / 0.18) 100%);
+        z-index: -1;
+      }
+      .hero-copy {
+        max-width: 760px;
+        padding: clamp(28px, 7vw, 78px);
+      }
       .eyebrow {
         color: var(--accent);
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 700;
         letter-spacing: 0;
-        margin: 0 0 12px;
+        margin: 0 0 14px;
         text-transform: uppercase;
       }
       h1 {
-        font-size: 56px;
-        line-height: 1;
+        font-size: clamp(44px, 11vw, 104px);
+        line-height: 0.94;
         letter-spacing: 0;
-        margin: 0 0 18px;
+        margin: 0 0 20px;
       }
       h2 {
-        font-size: 20px;
-        margin: 24px 0 8px;
+        color: var(--ink);
+        font-size: clamp(26px, 5vw, 48px);
+        line-height: 1.02;
+        letter-spacing: 0;
+        margin: 0;
+      }
+      h3 {
+        color: var(--ink);
+        font-size: 22px;
+        line-height: 1.1;
+        margin: 10px 0 8px;
       }
       p {
         color: var(--muted);
-        font-size: 17px;
+        font-size: 16px;
         line-height: 1.65;
+        margin: 0;
       }
       .lede {
-        color: #d9ded5;
-        font-size: 21px;
-        max-width: 680px;
+        color: var(--soft-ink);
+        font-size: clamp(18px, 3.2vw, 24px);
+        line-height: 1.45;
+        max-width: 650px;
       }
       .actions {
         display: flex;
@@ -739,82 +839,191 @@ function pageShell(title: string, env: Env, content: string): string {
         border-radius: 8px;
         color: var(--ink);
         display: inline-flex;
+        align-items: center;
+        justify-content: center;
         font-weight: 700;
         min-height: 44px;
-        padding: 11px 16px;
+        padding: 11px 15px;
         text-decoration: none;
+        transition: background 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out;
       }
       .button.primary {
         background: var(--accent);
-        color: #062012;
+        border-color: var(--accent);
+        color: var(--accent-ink);
       }
-      .phone {
-        position: relative;
-        border: 1px solid rgba(244, 241, 233, 0.18);
-        border-radius: 36px;
-        min-height: 470px;
-        padding: 72px 28px 28px;
-        background: #050706;
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
-        overflow: hidden;
+      .button.ghost {
+        color: var(--soft-ink);
       }
-      .island {
+      .button:hover {
+        background: var(--panel-2);
+        border-color: var(--line-strong);
+      }
+      .button.primary:hover {
+        background: oklch(85% 0.2 152);
+        color: var(--accent-ink);
+      }
+      .reader-scene {
         position: absolute;
-        top: 20px;
-        left: 50%;
-        width: 106px;
-        height: 32px;
-        border-radius: 999px;
-        transform: translateX(-50%);
-        background: #000;
+        inset: 0;
+        z-index: -2;
+        display: grid;
+        grid-template-rows: 1fr auto 1fr;
+        padding: clamp(28px, 5vw, 64px);
+        opacity: 0.9;
       }
-      .line {
-        border-bottom: 1px solid rgba(244, 241, 233, 0.06);
+      .reader-lines {
+        display: grid;
+        align-content: center;
+        gap: clamp(8px, 1.8vw, 18px);
+        min-width: 760px;
+        margin-left: clamp(120px, 28vw, 390px);
         font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-        font-size: 15px;
-        line-height: 2;
+        font-size: clamp(17px, 2.7vw, 35px);
+        line-height: 1.1;
+        color: oklch(91% 0.02 116 / 0.24);
         white-space: nowrap;
       }
-      .line.muted { color: rgba(244, 241, 233, 0.32); }
-      .line.revealed { color: var(--ink); }
-      .line.strong { font-weight: 800; }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 16px;
+      .reader-lines span {
+        display: block;
       }
-      article, .panel {
+      .reveal-band {
+        display: grid;
+        align-items: center;
+        min-height: clamp(72px, 18vw, 168px);
+        margin: 0 calc(clamp(28px, 5vw, 64px) * -1);
+        padding-left: clamp(180px, 36vw, 520px);
+        background: oklch(79% 0.21 152 / 0.08);
+        border-block: 1px solid oklch(79% 0.21 152 / 0.22);
+        box-shadow: 0 0 80px oklch(79% 0.21 152 / 0.13);
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: clamp(18px, 3.6vw, 44px);
+        font-weight: 700;
+        line-height: 1.15;
+        color: var(--ink);
+        white-space: nowrap;
+      }
+      .section {
+        padding: clamp(42px, 9vw, 96px) 0;
+      }
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 0.82fr) minmax(0, 1fr);
+        gap: clamp(28px, 8vw, 96px);
+        align-items: start;
+      }
+      .copy-stack {
+        display: grid;
+        gap: 18px;
+        max-width: 650px;
+      }
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+      article {
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
-        padding: 24px;
+        padding: 22px;
+      }
+      article span {
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 800;
+      }
+      article p {
+        font-size: 15px;
+      }
+      .apple-strip {
+        border-top: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
+        gap: 28px;
+      }
+      .link-list {
+        display: grid;
+        align-content: start;
+        gap: 10px;
+        font-size: 16px;
+      }
+      .link-list a {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--soft-ink);
+        padding: 13px 14px;
+        text-decoration: none;
+      }
+      .link-list a:hover {
+        border-color: var(--line-strong);
+        color: var(--ink);
       }
       .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: clamp(24px, 6vw, 46px);
         max-width: 760px;
         margin: 0 auto;
       }
       .prose h1 {
-        font-size: 42px;
+        font-size: clamp(36px, 8vw, 64px);
+        line-height: 0.98;
       }
+      .prose h2 { font-size: 24px; margin: 30px 0 10px; }
+      .prose p + p { margin-top: 16px; }
       .note {
-        border-left: 3px solid var(--accent);
-        padding-left: 14px;
+        border: 1px solid oklch(79% 0.21 152 / 0.28);
+        border-radius: 8px;
+        background: oklch(79% 0.21 152 / 0.06);
+        color: var(--soft-ink);
+        margin-top: 18px;
+        padding: 14px;
       }
       footer {
         border-top: 1px solid var(--line);
         color: var(--muted);
-        font-size: 13px;
-        margin-top: 48px;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 10px 18px;
+        font-size: 12px;
+        margin-top: 8px;
         padding-top: 22px;
       }
+      footer a {
+        color: var(--muted);
+        text-decoration: none;
+      }
+      footer a:hover {
+        color: var(--ink);
+      }
       @media (max-width: 760px) {
-        .wrap { width: min(100% - 24px, 1040px); padding-top: 20px; }
-        header { align-items: flex-start; flex-direction: column; padding-bottom: 24px; }
-        .hero { grid-template-columns: 1fr; gap: 28px; min-height: 0; }
-        h1 { font-size: 42px; }
-        .lede { font-size: 18px; }
-        .phone { min-height: 380px; }
-        .grid { grid-template-columns: 1fr; }
+        .wrap { width: min(100% - 24px, 1120px); padding-top: 12px; }
+        header { align-items: flex-start; flex-direction: column; }
+        .hero { min-height: 650px; }
+        .hero::after {
+          background:
+            linear-gradient(180deg, oklch(7% 0.014 154 / 0.04), var(--bg) 98%),
+            linear-gradient(90deg, var(--bg) 0%, oklch(7% 0.014 154 / 0.78) 68%, oklch(7% 0.014 154 / 0.26) 100%);
+        }
+        .hero-copy { padding: 24px; }
+        .actions { align-items: stretch; flex-direction: column; }
+        .button { width: 100%; }
+        .reader-scene { padding: 24px 16px; }
+        .reader-lines {
+          min-width: 560px;
+          margin-left: 124px;
+          font-size: 24px;
+        }
+        .reveal-band {
+          min-height: 112px;
+          padding-left: 135px;
+          font-size: 28px;
+        }
+        .split, .steps, .apple-strip { grid-template-columns: 1fr; }
+        .section { padding: 42px 0; }
       }
     </style>
   </head>
@@ -825,14 +1034,64 @@ function pageShell(title: string, env: Env, content: string): string {
         <nav aria-label="Main">
           <a href="/privacy">Privacy</a>
           <a href="/support">Support</a>
+          <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
+          <a href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
           <a href="/.well-known/apple-app-site-association">AASA</a>
         </nav>
       </header>
       <main>${content}</main>
-      <footer>cryptoscreen.app - one-time encrypted message beta</footer>
+      <footer>
+        <span>cryptoscreen.app, one-time encrypted message beta</span>
+        <span>
+          <a href="/privacy">Privacy</a>
+          &nbsp;/&nbsp;
+          <a href="/support">Support</a>
+          &nbsp;/&nbsp;
+          <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
+          &nbsp;/&nbsp;
+          <a href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
+        </span>
+      </footer>
     </div>
   </body>
 </html>`;
+}
+
+function siteLinks(env: Env): {
+  appStoreUrl: string;
+  githubUrl: string;
+  supportEmail: string;
+  xUrl: string;
+} {
+  const vars = env as unknown as Record<string, string | undefined>;
+
+  return {
+    appStoreUrl: externalUrl(`https://apps.apple.com/app/id${env.APPLE_APP_ID}`),
+    githubUrl: externalUrl(vars.GITHUB_REPOSITORY_URL ?? "https://github.com/DomenicoDD/cryptoscreen"),
+    supportEmail: emailAddress(vars.SUPPORT_EMAIL ?? "domenico.dd@gmail.com"),
+    xUrl: externalUrl(vars.X_PROFILE_URL ?? "https://x.com/DomenicoDD")
+  };
+}
+
+function externalUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:") {
+      return url.toString();
+    }
+  } catch {
+    // Fall through to a safe same-origin target.
+  }
+
+  return "/";
+}
+
+function emailAddress(value: string): string {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? value : "domenico.dd@gmail.com";
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHtml(value);
 }
 
 function escapeHtml(value: string): string {
