@@ -98,8 +98,8 @@ enum CipherText {
     var generator = SeededGenerator(seed: UInt64(seed + 1) &* 0x9E3779B97F4A7C15)
 
     return String(text.map { character in
-      guard character != " " else {
-        return " "
+      guard !character.isWhitespace else {
+        return character
       }
 
       return glyphs.randomElement(using: &generator) ?? "#"
@@ -112,7 +112,7 @@ enum CipherText {
     var generator = SeededGenerator(seed: UInt64(seed + 31 + tick) &* 0xBF58476D1CE4E5B9)
 
     return String(characters.enumerated().map { index, character in
-      if character == " " || index < revealCount {
+      if character.isWhitespace || index < revealCount {
         return character
       }
 

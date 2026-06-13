@@ -1,0 +1,19 @@
+cryptoscreen is a private note app for messages that should not last.
+
+Write a note, choose a six-digit PIN, and cryptoscreen encrypts the message on your iPhone before it leaves the device. Share the generated link and send the PIN separately. The recipient opens the note once, then the encrypted server row is consumed.
+
+What cryptoscreen does:
+- Encrypts notes locally before upload.
+- Requires both the link secret and the PIN to open a message.
+- Deletes normal message rows after one successful read.
+- Destroys the message after the third wrong PIN attempt.
+- Expires unopened links after the retention window.
+- Uses a guarded reader that reduces casual screen exposure.
+- Wipes the visible reader session if iOS reports a screenshot.
+- Supports encrypted image attachments while the feature is free in beta.
+- Supports App Clip opening for lightweight receiving.
+
+cryptoscreen is designed to avoid accounts, profiles, contact lists, and message plaintext on the server. The production service stores encrypted bytes, encrypted image attachment objects when supplied, attempt metadata, and expiry metadata. Screenshot protection is best-effort: iOS reports normal screenshots after capture, and no app can protect against external cameras or compromised devices.
+
+Support: https://cryptoscreen.app/support
+Privacy Policy: https://cryptoscreen.app/privacy

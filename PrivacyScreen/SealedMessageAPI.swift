@@ -6,7 +6,7 @@ struct SealedMessageAPI {
   let baseURL: URL
   var session: URLSession = .shared
 
-  func create(upload: SealedMessageUpload) async throws -> CreatedSealedMessage {
+  func create(upload: SealedMessageUpload, imageAttachment: SealedImageAttachmentUpload? = nil) async throws -> CreatedSealedMessage {
     let body = CreateMessageRequest(
       ciphertext: upload.ciphertext.base64URLEncodedString(),
       nonce: upload.nonce.base64URLEncodedString(),
@@ -24,13 +24,18 @@ struct SealedMessageAPI {
       throw SealedMessageAPIError.invalidResponse
     }
 
+    if let imageAttachment {
+      try await uploadAttachment(messageID: messageID, attachment: imageAttachment)
+    }
+
     let link = SealedMessageLink(messageID: messageID, secret: upload.linkSecret)
 
     return CreatedSealedMessage(
       id: messageID,
       link: link.url,
       pin: upload.normalizedPIN,
-      expiresAt: response.expiresAt
+      expiresAt: response.expiresAt,
+      hasImageAttachment: imageAttachment != nil
     )
   }
 
@@ -76,7 +81,14 @@ struct SealedMessageAPI {
           salt: salt
         )
         let plaintext = try SealedMessageCrypto.open(payload, request: request, pin: pin)
-        return .opened(plaintext)
+        let attachment = try await openAttachmentIfPresent(response.attachment, request: request, pin: pin, salt: salt)
+        return .opened(
+          OpenedSealedMessage(
+            plaintext: plaintext,
+            attachment: attachment,
+            retained: response.retained ?? false
+          )
+        )
       case "wrong_pin":
         return .wrongPin(remainingAttempts: response.remainingAttempts)
       case "destroyed":
@@ -91,6 +103,118 @@ struct SealedMessageAPI {
     } catch {
       return .networkFailed
     }
+  }
+
+  func reportReadSessionEvent(eventPath: String, type: String = "screenshot", timestamp: Date = Date()) async {
+    let timestampString = ISO8601DateFormatter().string(from: timestamp)
+    let body = ReadSessionEventRequest(type: type, timestamp: timestampString)
+    let _: ReadSessionEventResponse? = try? await send(
+      path: eventPath,
+      method: "POST",
+      body: body
+    )
+  }
+
+  func status(messageID: UUID) async throws -> SealedMessageRemoteStatus {
+    let response: MessageStatusResponse = try await send(
+      path: "/api/messages/\(messageID.uuidString.lowercased())/status",
+      method: "GET"
+    )
+
+    return SealedMessageRemoteStatus(rawValue: response.status) ?? .consumed
+  }
+
+  func submitFeedback(
+    rating: Int,
+    message: String,
+    appVersion: String?,
+    buildNumber: String?,
+    platform: String?,
+    device: String?,
+    timestamp: Date
+  ) async throws {
+    let timestampString = ISO8601DateFormatter().string(from: timestamp)
+    let body = SubmitFeedbackRequest(
+      rating: rating,
+      message: message,
+      appVersion: appVersion,
+      buildNumber: buildNumber,
+      platform: platform,
+      device: device,
+      timestamp: timestampString
+    )
+    let _: SubmitFeedbackResponse = try await send(
+      path: "/api/feedback",
+      method: "POST",
+      body: body
+    )
+  }
+
+  private func uploadAttachment(messageID: UUID, attachment: SealedImageAttachmentUpload) async throws {
+    guard let url = URL(string: "/api/messages/\(messageID.uuidString.lowercased())/attachment", relativeTo: baseURL)?.absoluteURL else {
+      throw SealedMessageAPIError.invalidResponse
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "PUT"
+    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("image", forHTTPHeaderField: "X-Cryptoscreen-Attachment-Type")
+    request.setValue(attachment.contentType, forHTTPHeaderField: "X-Cryptoscreen-Attachment-Content-Type")
+    request.setValue(attachment.encryptedFileKey.base64URLEncodedString(), forHTTPHeaderField: "X-Cryptoscreen-Encrypted-File-Key")
+    request.httpBody = attachment.ciphertext
+
+    let (_, response) = try await session.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw SealedMessageAPIError.invalidResponse
+    }
+    guard (200..<300).contains(httpResponse.statusCode) else {
+      throw SealedMessageAPIError.httpStatus(httpResponse.statusCode)
+    }
+  }
+
+  private func openAttachmentIfPresent(
+    _ attachment: ConsumeAttachmentResponse?,
+    request: MessageOpenRequest,
+    pin: String,
+    salt: Data
+  ) async throws -> OpenedSealedAttachment? {
+    guard let attachment else {
+      return nil
+    }
+
+    guard
+      attachment.type == "image",
+      let encryptedFileKey = Data(base64URLEncoded: attachment.encryptedFileKey)
+    else {
+      throw SealedMessageAPIError.invalidResponse
+    }
+
+    guard let url = URL(string: attachment.downloadPath, relativeTo: baseURL)?.absoluteURL else {
+      throw SealedMessageAPIError.invalidResponse
+    }
+
+    var downloadRequest = URLRequest(url: url)
+    downloadRequest.httpMethod = "GET"
+    downloadRequest.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+
+    let (ciphertext, response) = try await session.data(for: downloadRequest)
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw SealedMessageAPIError.invalidResponse
+    }
+    guard (200..<300).contains(httpResponse.statusCode) else {
+      throw SealedMessageAPIError.httpStatus(httpResponse.statusCode)
+    }
+
+    return try SealedMessageCrypto.openImageAttachment(
+      ciphertext: ciphertext,
+      encryptedFileKey: encryptedFileKey,
+      contentType: attachment.contentType,
+      request: request,
+      pin: pin,
+      salt: salt,
+      eventPath: attachment.eventPath
+    )
   }
 
   private func send<RequestBody: Encodable, ResponseBody: Decodable>(
@@ -125,6 +249,42 @@ struct SealedMessageAPI {
       throw SealedMessageAPIError.invalidResponse
     }
   }
+
+  private func send<ResponseBody: Decodable>(
+    path: String,
+    method: String
+  ) async throws -> ResponseBody {
+    guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
+      throw SealedMessageAPIError.invalidResponse
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = method
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+    let (data, response) = try await session.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw SealedMessageAPIError.invalidResponse
+    }
+    guard (200..<300).contains(httpResponse.statusCode) else {
+      throw SealedMessageAPIError.httpStatus(httpResponse.statusCode)
+    }
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    do {
+      return try decoder.decode(ResponseBody.self, from: data)
+    } catch {
+      throw SealedMessageAPIError.invalidResponse
+    }
+  }
+}
+
+enum SealedMessageRemoteStatus: String {
+  case active
+  case consumed
+  case expired
 }
 
 private struct CreateMessageRequest: Encodable {
@@ -149,10 +309,50 @@ private struct ConsumeMessageRequest: Encodable {
 private struct ConsumeMessageResponse: Decodable {
   let status: String
   let remainingAttempts: Int
+  let retained: Bool?
   let ciphertext: String?
   let nonce: String?
   let tag: String?
   let salt: String?
+  let attachment: ConsumeAttachmentResponse?
+}
+
+private struct ConsumeAttachmentResponse: Decodable {
+  let id: String
+  let type: String
+  let contentType: String
+  let byteLength: Int
+  let encryptedFileKey: String
+  let downloadPath: String
+  let eventPath: String
+  let expiresAt: Date
+}
+
+private struct MessageStatusResponse: Decodable {
+  let status: String
+}
+
+private struct SubmitFeedbackRequest: Encodable {
+  let rating: Int
+  let message: String
+  let appVersion: String?
+  let buildNumber: String?
+  let platform: String?
+  let device: String?
+  let timestamp: String
+}
+
+private struct SubmitFeedbackResponse: Decodable {
+  let ok: Bool
+}
+
+private struct ReadSessionEventRequest: Encodable {
+  let type: String
+  let timestamp: String
+}
+
+private struct ReadSessionEventResponse: Decodable {
+  let ok: Bool
 }
 
 private enum SealedMessageAPIError: Error {

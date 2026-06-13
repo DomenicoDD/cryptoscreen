@@ -23,11 +23,30 @@ struct SealedMessageUpload: Equatable {
   let normalizedPIN: String
 }
 
+struct SealedImageAttachmentUpload: Equatable {
+  let ciphertext: Data
+  let encryptedFileKey: Data
+  let contentType: String
+  let originalByteCount: Int
+}
+
 struct OpenedSealedMessagePayload: Equatable {
   let ciphertext: Data
   let nonce: Data
   let tag: Data
   let salt: Data
+}
+
+struct OpenedSealedAttachment: Equatable {
+  let data: Data
+  let contentType: String
+  let eventPath: String?
+}
+
+struct OpenedSealedMessage: Equatable {
+  let plaintext: String
+  let attachment: OpenedSealedAttachment?
+  let retained: Bool
 }
 
 struct SealedMessageLink: Equatable {
@@ -50,10 +69,11 @@ struct CreatedSealedMessage: Identifiable, Equatable {
   let link: URL
   let pin: String
   let expiresAt: Date
+  let hasImageAttachment: Bool
 }
 
 enum MessageOpenResult: Equatable {
-  case opened(String)
+  case opened(OpenedSealedMessage)
   case wrongPin(remainingAttempts: Int)
   case destroyed
   case expired
@@ -68,6 +88,8 @@ enum SealedMessageCrypto {
   static let pinLength = 6
   static let defaultMaxAttempts = 3
   static let defaultTimeToLive: TimeInterval = 60 * 60 * 24 * 30
+  static let maxImageAttachmentByteCount = 10 * 1024 * 1024
+  static let supportedImageContentTypes: Set<String> = ["image/jpeg", "image/png", "image/heic", "image/heif"]
 
   static func seal(
     plaintext: String,
@@ -127,12 +149,50 @@ enum SealedMessageCrypto {
     )
   }
 
+  static func sealImageAttachment(
+    imageData: Data,
+    contentType: String,
+    upload: SealedMessageUpload
+  ) throws -> SealedImageAttachmentUpload {
+    guard supportedImageContentTypes.contains(contentType) else {
+      throw SealedMessageError.invalidAttachment
+    }
+    guard !imageData.isEmpty && imageData.count <= maxImageAttachmentByteCount else {
+      throw SealedMessageError.invalidAttachment
+    }
+
+    let imageKeyData = try randomData(byteCount: 32)
+    let imageKey = SymmetricKey(data: imageKeyData)
+    let imageBox = try AES.GCM.seal(imageData, using: imageKey)
+    guard let imageCiphertext = imageBox.combined else {
+      throw SealedMessageError.missingCombinedPayload
+    }
+
+    let messageKey = deriveContentKey(linkSecret: upload.linkSecret, pin: upload.normalizedPIN, salt: upload.salt)
+    let encryptedKeyBox = try AES.GCM.seal(imageKeyData, using: messageKey)
+    guard let encryptedFileKey = encryptedKeyBox.combined else {
+      throw SealedMessageError.missingCombinedPayload
+    }
+
+    return SealedImageAttachmentUpload(
+      ciphertext: imageCiphertext,
+      encryptedFileKey: encryptedFileKey,
+      contentType: contentType,
+      originalByteCount: imageData.count
+    )
+  }
+
   static func request(from link: String) -> MessageOpenRequest? {
-    guard let url = URL(string: link.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+    let trimmedLink = link.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let url = URL(string: trimmedLink), let request = request(from: url) {
+      return request
+    }
+
+    guard let embeddedURL = firstMessageURL(in: trimmedLink) else {
       return nil
     }
 
-    return request(from: url)
+    return request(from: embeddedURL)
   }
 
   static func request(from url: URL) -> MessageOpenRequest? {
@@ -201,6 +261,38 @@ enum SealedMessageCrypto {
     }
 
     return message
+  }
+
+  static func openImageAttachment(
+    ciphertext: Data,
+    encryptedFileKey: Data,
+    contentType: String,
+    request: MessageOpenRequest,
+    pin: String,
+    salt: Data,
+    eventPath: String?
+  ) throws -> OpenedSealedAttachment {
+    guard supportedImageContentTypes.contains(contentType) else {
+      throw SealedMessageError.invalidAttachment
+    }
+
+    let normalizedPIN = normalizePIN(pin)
+    guard normalizedPIN.count == pinLength else {
+      throw SealedMessageError.invalidPIN
+    }
+
+    let messageKey = deriveContentKey(linkSecret: request.linkSecret, pin: normalizedPIN, salt: salt)
+    let encryptedKeyBox = try AES.GCM.SealedBox(combined: encryptedFileKey)
+    let imageKeyData = try AES.GCM.open(encryptedKeyBox, using: messageKey)
+    let imageKey = SymmetricKey(data: imageKeyData)
+    let imageBox = try AES.GCM.SealedBox(combined: ciphertext)
+    let imageData = try AES.GCM.open(imageBox, using: imageKey)
+
+    guard !imageData.isEmpty && imageData.count <= maxImageAttachmentByteCount else {
+      throw SealedMessageError.invalidAttachment
+    }
+
+    return OpenedSealedAttachment(data: imageData, contentType: contentType, eventPath: eventPath)
   }
 
   static func normalizePIN(_ pin: String) -> String {
@@ -274,6 +366,24 @@ enum SealedMessageCrypto {
 
     return difference == 0
   }
+
+  private static func firstMessageURL(in text: String) -> URL? {
+    guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+      return nil
+    }
+
+    let range = NSRange(text.startIndex..<text.endIndex, in: text)
+    return detector
+      .matches(in: text, options: [], range: range)
+      .compactMap(\.url)
+      .first { url in
+        guard url.scheme == "https", url.host == "cryptoscreen.app" || url.host == "www.cryptoscreen.app" else {
+          return false
+        }
+
+        return url.pathComponents.contains("m")
+      }
+  }
 }
 
 struct MessageOpenRequest: Equatable {
@@ -283,6 +393,7 @@ struct MessageOpenRequest: Equatable {
 
 enum SealedMessageError: Error {
   case invalidPIN
+  case invalidAttachment
   case invalidPlaintext
   case missingCombinedPayload
   case randomFailure

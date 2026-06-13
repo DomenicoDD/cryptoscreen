@@ -4,10 +4,9 @@ import UIKit
 final class ProximitySensor: ObservableObject {
   @Published private(set) var isCovered = false
   @Published private(set) var isMonitoringAvailable = false
-  @Published var isManualRevealEnabled = false
 
   var isRevealActive: Bool {
-    isCovered || isManualRevealEnabled
+    isCovered
   }
 
   func start() {

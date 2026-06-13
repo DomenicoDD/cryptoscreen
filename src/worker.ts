@@ -4,14 +4,22 @@ import { neon } from "@neondatabase/serverless";
 
 const MAX_REQUEST_BYTES = 128 * 1024;
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ENCRYPTED_FILE_KEY_BYTES = 128;
 const LINK_RETENTION_DAYS = 30;
 const LINK_RETENTION_SECONDS = LINK_RETENTION_DAYS * 24 * 60 * 60;
 const DEFAULT_TTL_SECONDS = LINK_RETENTION_SECONDS;
 const MAX_TTL_SECONDS = LINK_RETENTION_SECONDS;
+const READ_SESSION_TTL_SECONDS = 5 * 60;
+const MAX_FEEDBACK_MESSAGE_CHARS = 2_000;
+const MAX_FEEDBACK_METADATA_CHARS = 180;
+const MAX_FEEDBACK_TIMESTAMP_CHARS = 64;
 const ALPHA_LYRAE_FONT_URL = "/assets/AlphaLyrae-Medium.woff2";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+={0,2}$/;
 const consumeStatuses = ["opened", "wrong_pin", "destroyed", "expired", "unavailable"] as const;
+const attachmentContentTypes = ["image/jpeg", "image/png", "image/heic", "image/heif"] as const;
+const readSessionEventTypes = ["screenshot"] as const;
 const encoder = new TextEncoder();
 
 class HttpError extends Error {
@@ -37,6 +45,21 @@ type ConsumeMessageBody = {
   pinProof: string;
 };
 
+type FeedbackBody = {
+  rating: number;
+  message: string;
+  appVersion?: string;
+  buildNumber?: string;
+  platform?: string;
+  device?: string;
+  timestamp: string;
+};
+
+type ReadSessionEventBody = {
+  type: "screenshot";
+  timestamp: string;
+};
+
 type CreateMessageRow = {
   id: string;
   max_attempts: number;
@@ -46,15 +69,49 @@ type CreateMessageRow = {
 type ConsumeMessageRow = {
   status: "opened" | "wrong_pin" | "destroyed" | "expired" | "unavailable";
   remaining_attempts: number | null;
+  retained: boolean | null;
   ciphertext: string | null;
   nonce: string | null;
   tag: string | null;
   salt: string | null;
+  attachment_id: string | null;
+  attachment_object_key: string | null;
+  attachment_type: "image" | null;
+  attachment_content_type: AttachmentContentType | null;
+  attachment_ciphertext_bytes: number | null;
+  attachment_encrypted_file_key: string | null;
+};
+
+type MessageStatusRow = {
+  status: "active" | "expired" | "consumed";
+};
+
+type AttachmentContentType = (typeof attachmentContentTypes)[number];
+
+type AttachmentMetadataRow = {
+  id: string;
+  expires_at: string;
+};
+
+type MessageAttachmentStateRow = {
+  expires_at: string | null;
+  has_attachment: boolean;
+};
+
+type ReadSessionRow = {
+  object_key: string;
+  content_type: AttachmentContentType;
+  ciphertext_bytes: number;
+};
+
+type MessageStats = {
+  sharedMessages: number;
+  updatedAt: string | null;
 };
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-jQ7CUr6PihHw53VP8zk6qFauAKoe7HjOv6gHMqkAvmg='; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-L0mMwZH2Y8BB9JbniZ5Xbk2cWIpVpMQyZCg7II8HSNM=' 'sha256-jV/YTTPdPdYxQ4KasU5NffuPLChgovdtiYvck0B/a0Q='; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -62,8 +119,8 @@ const securityHeaders = {
 };
 
 const corsHeaders = {
-  "Access-Control-Allow-Headers": "content-type",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "content-type, x-cryptoscreen-attachment-type, x-cryptoscreen-attachment-content-type, x-cryptoscreen-encrypted-file-key",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Max-Age": "86400"
 };
@@ -81,13 +138,41 @@ export default {
         return await health(env);
       }
 
+      if (url.pathname === "/api/stats" && request.method === "GET") {
+        return await stats(env);
+      }
+
+      if (url.pathname === "/api/feedback" && request.method === "POST") {
+        return await submitFeedback(request, env);
+      }
+
       if (url.pathname === "/api/messages" && request.method === "POST") {
         return await createMessage(request, env);
+      }
+
+      const attachmentUploadMatch = /^\/api\/messages\/([^/]+)\/attachment$/.exec(url.pathname);
+      if (attachmentUploadMatch && request.method === "PUT") {
+        return await uploadMessageAttachment(request, env, attachmentUploadMatch[1]);
+      }
+
+      const statusMatch = /^\/api\/messages\/([^/]+)\/status$/.exec(url.pathname);
+      if (statusMatch && request.method === "GET") {
+        return await messageStatus(env, statusMatch[1]);
       }
 
       const consumeMatch = /^\/api\/messages\/([^/]+)\/consume$/.exec(url.pathname);
       if (consumeMatch && request.method === "POST") {
         return await consumeMessage(request, env, consumeMatch[1]);
+      }
+
+      const readSessionAttachmentMatch = /^\/api\/read-sessions\/([^/]+)\/attachment$/.exec(url.pathname);
+      if (readSessionAttachmentMatch && request.method === "GET") {
+        return await downloadReadSessionAttachment(env, readSessionAttachmentMatch[1]);
+      }
+
+      const readSessionEventMatch = /^\/api\/read-sessions\/([^/]+)\/events$/.exec(url.pathname);
+      if (readSessionEventMatch && request.method === "POST") {
+        return await recordReadSessionEvent(request, env, readSessionEventMatch[1]);
       }
 
       if (request.method !== "GET" && request.method !== "HEAD") {
@@ -114,7 +199,7 @@ export default {
       }
 
       if (url.pathname === "/" || url.pathname === "") {
-        return htmlResponse(homePage(env));
+        return htmlResponse(await homePage(env));
       }
 
       return htmlResponse(notFoundPage(env), 404);
@@ -145,6 +230,48 @@ async function health(env: Env): Promise<Response> {
     ok: row.ok === 1,
     environment: env.ENVIRONMENT,
     service: "cryptoscreen"
+  });
+}
+
+async function stats(env: Env): Promise<Response> {
+  return jsonResponse(await getMessageStats(env), 200, {
+    "Cache-Control": "no-store"
+  });
+}
+
+async function getMessageStats(env: Env): Promise<MessageStats> {
+  const sql = neon(env.DATABASE_URL);
+  const rows = await sql`
+    select
+      coalesce(
+        (select shared_messages from cryptoscreen.message_stats where id = true),
+        0
+      )::text as shared_messages,
+      (
+        select updated_at::text
+        from cryptoscreen.message_stats
+        where id = true
+      ) as updated_at
+  `;
+
+  return parseMessageStatsRow(rows[0]);
+}
+
+async function safeMessageStats(env: Env): Promise<MessageStats | null> {
+  try {
+    return await getMessageStats(env);
+  } catch (error) {
+    console.error(JSON.stringify({ level: "error", message: "Unable to load message stats", error: describeError(error) }));
+    return null;
+  }
+}
+
+async function submitFeedback(request: Request, env: Env): Promise<Response> {
+  const body = parseFeedbackBody(await readJson(request));
+  await sendFeedbackEmail(body, env);
+
+  return jsonResponse({ ok: true }, 202, {
+    "Cache-Control": "no-store"
   });
 }
 
@@ -192,6 +319,112 @@ async function createMessage(request: Request, env: Env): Promise<Response> {
   );
 }
 
+async function uploadMessageAttachment(request: Request, env: Env, messageID: string): Promise<Response> {
+  if (!UUID_RE.test(messageID)) {
+    throw new HttpError(400, "invalid_message_id", "Message id must be a UUID.");
+  }
+
+  const requestContentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!requestContentType.includes("application/octet-stream")) {
+    throw new HttpError(415, "unsupported_media_type", "Upload encrypted attachment bytes as application/octet-stream.");
+  }
+
+  const attachmentType = request.headers.get("x-cryptoscreen-attachment-type")?.trim().toLowerCase();
+  if (attachmentType !== "image") {
+    throw new HttpError(400, "invalid_attachment_type", "Only encrypted image attachments are supported.");
+  }
+
+  const contentType = parseAttachmentContentType(request.headers.get("x-cryptoscreen-attachment-content-type"));
+  const encryptedFileKey = expectHeader(request.headers.get("x-cryptoscreen-encrypted-file-key"), "x-cryptoscreen-encrypted-file-key");
+  const encryptedFileKeyHex = base64UrlToHex(encryptedFileKey, "encryptedFileKey", 60, MAX_ENCRYPTED_FILE_KEY_BYTES);
+  const attachmentBytes = await readAttachmentBytes(request);
+
+  const sql = neon(env.DATABASE_URL);
+  const stateRows = await sql`
+    with active_message as (
+      select id, expires_at
+      from cryptoscreen.sealed_messages
+      where id = ${messageID}::uuid
+        and not retained
+        and expires_at > now()
+      limit 1
+    )
+    select
+      (select expires_at::text from active_message) as expires_at,
+      exists (
+        select 1
+        from cryptoscreen.sealed_message_attachments
+        where message_id = ${messageID}::uuid
+      ) as has_attachment
+  `;
+  const state = parseMessageAttachmentStateRow(stateRows[0]);
+  if (state.expires_at === null) {
+    throw new HttpError(404, "message_unavailable", "No active normal message exists for this attachment upload.");
+  }
+  if (state.has_attachment) {
+    throw new HttpError(409, "attachment_exists", "This message already has an attachment.");
+  }
+
+  const attachmentID = crypto.randomUUID();
+  const objectKey = `attachments/${messageID}/${attachmentID}.bin`;
+  const bucket = attachmentBucket(env);
+
+  await bucket.put(objectKey, attachmentBytes, {
+    httpMetadata: {
+      contentType: "application/octet-stream"
+    },
+    customMetadata: {
+      attachmentType,
+      declaredContentType: contentType
+    }
+  });
+
+  try {
+    const rows = await sql`
+      insert into cryptoscreen.sealed_message_attachments (
+        id,
+        message_id,
+        object_key,
+        attachment_type,
+        content_type,
+        ciphertext_bytes,
+        encrypted_file_key,
+        expires_at
+      )
+      values (
+        ${attachmentID}::uuid,
+        ${messageID}::uuid,
+        ${objectKey},
+        'image',
+        ${contentType},
+        ${attachmentBytes.byteLength},
+        decode(${encryptedFileKeyHex}, 'hex'),
+        ${state.expires_at}::timestamptz
+      )
+      returning id::text, expires_at::text
+    `;
+    const row = parseAttachmentMetadataRow(rows[0]);
+
+    return jsonResponse(
+      {
+        id: row.id,
+        type: "image",
+        contentType,
+        byteLength: attachmentBytes.byteLength,
+        expiresAt: row.expires_at
+      },
+      201,
+      {
+        "Cache-Control": "no-store"
+      }
+    );
+  } catch (error) {
+    await bucket.delete(objectKey);
+    console.error(JSON.stringify({ level: "error", message: "Attachment metadata insert failed", error: describeError(error) }));
+    throw new HttpError(409, "attachment_not_saved", "The encrypted attachment could not be attached to this message.");
+  }
+}
+
 async function consumeMessage(request: Request, env: Env, messageID: string): Promise<Response> {
   if (!UUID_RE.test(messageID)) {
     throw new HttpError(400, "invalid_message_id", "Message id must be a UUID.");
@@ -199,24 +432,13 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
 
   const body = parseConsumeBody(await readJson(request));
   const pinVerifierHex = bytesToHex(await pepperPinProof(base64UrlToBytes(body.pinProof, "pinProof", 32, 32), env));
-  const sql = neon(env.DATABASE_URL);
-  const rows = await sql`
-    select
-      status::text,
-      remaining_attempts,
-      encode(ciphertext, 'base64') as ciphertext,
-      encode(nonce, 'base64') as nonce,
-      encode(tag, 'base64') as tag,
-      encode(salt, 'base64') as salt
-    from cryptoscreen.consume_sealed_message(${messageID}::uuid, decode(${pinVerifierHex}, 'hex'))
-  `;
-
-  const row = parseConsumeRow(rows[0]);
+  const row = await consumeMessageRow(env, messageID, pinVerifierHex);
 
   if (row.status !== "opened") {
     return jsonResponse({
       status: row.status,
-      remainingAttempts: row.remaining_attempts ?? 0
+      remainingAttempts: row.remaining_attempts ?? 0,
+      retained: row.retained ?? false
     });
   }
 
@@ -224,19 +446,292 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
   assertColumn(row.nonce, "nonce");
   assertColumn(row.tag, "tag");
   assertColumn(row.salt, "salt");
+  const attachment = row.retained
+    ? null
+    : await createReadSessionForAttachment(env, messageID, row);
 
   return jsonResponse({
     status: row.status,
     remainingAttempts: row.remaining_attempts ?? 0,
+    retained: row.retained ?? false,
     ciphertext: base64ToBase64Url(row.ciphertext),
     nonce: base64ToBase64Url(row.nonce),
     tag: base64ToBase64Url(row.tag),
-    salt: base64ToBase64Url(row.salt)
+    salt: base64ToBase64Url(row.salt),
+    attachment
+  });
+}
+
+async function consumeMessageRow(
+  env: Env,
+  messageID: string,
+  pinVerifierHex: string
+): Promise<ConsumeMessageRow> {
+  const sql = neon(env.DATABASE_URL);
+
+  try {
+    const rows = await sql`
+      select
+        status::text,
+        remaining_attempts,
+        retained,
+        encode(ciphertext, 'base64') as ciphertext,
+        encode(nonce, 'base64') as nonce,
+        encode(tag, 'base64') as tag,
+        encode(salt, 'base64') as salt,
+        attachment_id::text,
+        attachment_object_key,
+        attachment_type,
+        attachment_content_type,
+        attachment_ciphertext_bytes,
+        encode(attachment_encrypted_file_key, 'base64') as attachment_encrypted_file_key
+      from cryptoscreen.consume_sealed_message(${messageID}::uuid, decode(${pinVerifierHex}, 'hex'))
+    `;
+
+    return parseConsumeRow(rows[0]);
+  } catch (error) {
+    console.error(JSON.stringify({ level: "warn", message: "Attachment consume path unavailable; trying retained legacy path", error: describeError(error) }));
+  }
+
+  try {
+    const rows = await sql`
+      select
+        status::text,
+        remaining_attempts,
+        retained,
+        encode(ciphertext, 'base64') as ciphertext,
+        encode(nonce, 'base64') as nonce,
+        encode(tag, 'base64') as tag,
+        encode(salt, 'base64') as salt
+      from cryptoscreen.consume_sealed_message(${messageID}::uuid, decode(${pinVerifierHex}, 'hex'))
+    `;
+
+    return parseConsumeRowWithoutAttachment(rows[0]);
+  } catch (error) {
+    console.error(JSON.stringify({ level: "warn", message: "Retained consume path unavailable; trying V1 legacy path", error: describeError(error) }));
+  }
+
+  const rows = await sql`
+    select
+      status::text,
+      remaining_attempts,
+      false as retained,
+      encode(ciphertext, 'base64') as ciphertext,
+      encode(nonce, 'base64') as nonce,
+      encode(tag, 'base64') as tag,
+      encode(salt, 'base64') as salt
+    from cryptoscreen.consume_sealed_message(${messageID}::uuid, decode(${pinVerifierHex}, 'hex'))
+  `;
+
+  return parseConsumeRowWithoutAttachment(rows[0]);
+}
+
+async function createReadSessionForAttachment(
+  env: Env,
+  messageID: string,
+  row: ConsumeMessageRow
+): Promise<{
+  id: string;
+  type: "image";
+  contentType: AttachmentContentType;
+  byteLength: number;
+  encryptedFileKey: string;
+  downloadPath: string;
+  eventPath: string;
+  expiresAt: string;
+} | null> {
+  if (
+    row.attachment_id === null ||
+    row.attachment_object_key === null ||
+    row.attachment_type === null ||
+    row.attachment_content_type === null ||
+    row.attachment_ciphertext_bytes === null ||
+    row.attachment_encrypted_file_key === null
+  ) {
+    return null;
+  }
+
+  const readSessionID = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + READ_SESSION_TTL_SECONDS * 1000).toISOString();
+  const encryptedFileKeyBase64Url = base64ToBase64Url(row.attachment_encrypted_file_key);
+  const encryptedFileKeyHex = base64UrlToHex(
+    encryptedFileKeyBase64Url,
+    "attachmentEncryptedFileKey",
+    60,
+    MAX_ENCRYPTED_FILE_KEY_BYTES
+  );
+  const sql = neon(env.DATABASE_URL);
+
+  await sql`
+    insert into cryptoscreen.sealed_message_read_sessions (
+      id,
+      message_id,
+      attachment_id,
+      object_key,
+      attachment_type,
+      content_type,
+      ciphertext_bytes,
+      encrypted_file_key,
+      expires_at
+    )
+    values (
+      ${readSessionID}::uuid,
+      ${messageID}::uuid,
+      ${row.attachment_id}::uuid,
+      ${row.attachment_object_key},
+      ${row.attachment_type},
+      ${row.attachment_content_type},
+      ${row.attachment_ciphertext_bytes},
+      decode(${encryptedFileKeyHex}, 'hex'),
+      ${expiresAt}::timestamptz
+    )
+  `;
+
+  return {
+    id: readSessionID,
+    type: "image",
+    contentType: row.attachment_content_type,
+    byteLength: row.attachment_ciphertext_bytes,
+    encryptedFileKey: encryptedFileKeyBase64Url,
+    downloadPath: `/api/read-sessions/${readSessionID}/attachment`,
+    eventPath: `/api/read-sessions/${readSessionID}/events`,
+    expiresAt
+  };
+}
+
+async function downloadReadSessionAttachment(env: Env, readSessionID: string): Promise<Response> {
+  if (!UUID_RE.test(readSessionID)) {
+    throw new HttpError(400, "invalid_read_session_id", "Read session id must be a UUID.");
+  }
+
+  const sql = neon(env.DATABASE_URL);
+  const rows = await sql`
+    update cryptoscreen.sealed_message_read_sessions
+    set consumed_at = now()
+    where id = ${readSessionID}::uuid
+      and consumed_at is null
+      and expires_at > now()
+    returning
+      object_key,
+      content_type,
+      ciphertext_bytes
+  `;
+  if (rows.length === 0) {
+    throw new HttpError(410, "read_session_unavailable", "This attachment read session is no longer available.");
+  }
+
+  const row = parseReadSessionRow(rows[0]);
+  const bucket = attachmentBucket(env);
+  const object = await bucket.get(row.object_key);
+  if (object === null) {
+    throw new HttpError(410, "attachment_unavailable", "The encrypted attachment is no longer available.");
+  }
+
+  const body = await object.arrayBuffer();
+  await bucket.delete(row.object_key);
+
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...securityHeaders,
+      ...corsHeaders,
+      "Cache-Control": "no-store",
+      "Content-Length": String(body.byteLength),
+      "Content-Type": "application/octet-stream",
+      "X-Content-Type-Options": "nosniff"
+    }
+  });
+}
+
+async function recordReadSessionEvent(request: Request, env: Env, readSessionID: string): Promise<Response> {
+  if (!UUID_RE.test(readSessionID)) {
+    throw new HttpError(400, "invalid_read_session_id", "Read session id must be a UUID.");
+  }
+
+  const body = parseReadSessionEventBody(await readJson(request));
+  const sql = neon(env.DATABASE_URL);
+  const rows = await sql`
+    insert into cryptoscreen.sealed_message_read_session_events (
+      read_session_id,
+      event_type,
+      occurred_at
+    )
+    select
+      ${readSessionID}::uuid,
+      ${body.type},
+      ${body.timestamp}::timestamptz
+    where exists (
+      select 1
+      from cryptoscreen.sealed_message_read_sessions
+      where id = ${readSessionID}::uuid
+        and expires_at > now()
+    )
+    returning id
+  `;
+
+  if (rows.length === 0) {
+    throw new HttpError(410, "read_session_unavailable", "This read session is no longer available.");
+  }
+
+  return jsonResponse({ ok: true }, 202, {
+    "Cache-Control": "no-store"
+  });
+}
+
+async function messageStatus(env: Env, messageID: string): Promise<Response> {
+  if (!UUID_RE.test(messageID)) {
+    throw new HttpError(400, "invalid_message_id", "Message id must be a UUID.");
+  }
+
+  const sql = neon(env.DATABASE_URL);
+  const rows = await sql`
+    with deleted_expired as (
+      delete from cryptoscreen.sealed_messages
+      where id = ${messageID}::uuid
+        and not retained
+        and expires_at <= now()
+      returning id
+    ),
+    active_message as (
+      select id
+      from cryptoscreen.sealed_messages
+      where id = ${messageID}::uuid
+      limit 1
+    )
+    select
+      case
+        when exists (select 1 from active_message) then 'active'
+        when exists (select 1 from deleted_expired) then 'expired'
+        else 'consumed'
+      end as status
+  `;
+
+  return jsonResponse(parseMessageStatusRow(rows[0]), 200, {
+    "Cache-Control": "no-store"
   });
 }
 
 async function deleteExpiredMessages(env: Env): Promise<void> {
   const sql = neon(env.DATABASE_URL);
+  const bucket = (env as Env & { ATTACHMENTS?: R2Bucket }).ATTACHMENTS;
+  if (bucket) {
+    const rows = await sql`
+      select object_key
+      from cryptoscreen.sealed_message_attachments
+      where expires_at <= now()
+      union
+      select object_key
+      from cryptoscreen.sealed_message_read_sessions
+      where expires_at <= now()
+    `;
+
+    await Promise.all(
+      rows
+        .map((row) => expectDatabaseString(expectDatabaseRecord(row).object_key, "object_key"))
+        .map((objectKey) => bucket.delete(objectKey))
+    );
+  }
+
   await sql`select cryptoscreen.delete_expired_sealed_messages()`;
 }
 
@@ -286,6 +781,99 @@ function parseConsumeBody(value: unknown): ConsumeMessageBody {
   };
 }
 
+function parseFeedbackBody(value: unknown): FeedbackBody {
+  const body = expectRecord(value);
+  const rating = expectInteger(body.rating, "rating");
+  if (rating < 1 || rating > 5) {
+    throw new HttpError(400, "invalid_rating", "rating must be between 1 and 5.");
+  }
+
+  const message = expectString(body.message, "message").trim();
+  if (message.length === 0) {
+    throw new HttpError(400, "invalid_feedback", "message must not be empty.");
+  }
+  if (message.length > MAX_FEEDBACK_MESSAGE_CHARS) {
+    throw new HttpError(400, "feedback_too_long", `message must be ${MAX_FEEDBACK_MESSAGE_CHARS} characters or fewer.`);
+  }
+
+  const timestamp = expectString(body.timestamp, "timestamp").trim();
+  if (timestamp.length > MAX_FEEDBACK_TIMESTAMP_CHARS || Number.isNaN(Date.parse(timestamp))) {
+    throw new HttpError(400, "invalid_timestamp", "timestamp must be a valid ISO-8601 date string.");
+  }
+
+  return {
+    rating,
+    message,
+    appVersion: expectOptionalString(body.appVersion, "appVersion", MAX_FEEDBACK_METADATA_CHARS),
+    buildNumber: expectOptionalString(body.buildNumber, "buildNumber", MAX_FEEDBACK_METADATA_CHARS),
+    platform: expectOptionalString(body.platform, "platform", MAX_FEEDBACK_METADATA_CHARS),
+    device: expectOptionalString(body.device, "device", MAX_FEEDBACK_METADATA_CHARS),
+    timestamp
+  };
+}
+
+function parseReadSessionEventBody(value: unknown): ReadSessionEventBody {
+  const body = expectRecord(value);
+  const type = expectString(body.type, "type");
+  if (!isReadSessionEventType(type)) {
+    throw new HttpError(400, "invalid_event_type", "Only screenshot events are supported.");
+  }
+
+  const timestamp = expectString(body.timestamp, "timestamp").trim();
+  if (timestamp.length > MAX_FEEDBACK_TIMESTAMP_CHARS || Number.isNaN(Date.parse(timestamp))) {
+    throw new HttpError(400, "invalid_timestamp", "timestamp must be a valid ISO-8601 date string.");
+  }
+
+  return {
+    type,
+    timestamp
+  };
+}
+
+function parseAttachmentContentType(value: string | null): AttachmentContentType {
+  const contentType = value?.trim().toLowerCase();
+  if (!contentType || !isAttachmentContentType(contentType)) {
+    throw new HttpError(400, "invalid_attachment_content_type", "Only JPEG, PNG, HEIC, and HEIF images are supported.");
+  }
+
+  return contentType;
+}
+
+function expectHeader(value: string | null, field: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    throw new HttpError(400, "missing_header", `${field} is required.`);
+  }
+
+  return trimmed;
+}
+
+async function readAttachmentBytes(request: Request): Promise<Uint8Array> {
+  const declaredLength = Number(request.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_ATTACHMENT_BYTES) {
+    throw new HttpError(413, "attachment_too_large", "The encrypted attachment is too large.");
+  }
+
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength === 0) {
+    throw new HttpError(400, "empty_attachment", "The encrypted attachment must not be empty.");
+  }
+  if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+    throw new HttpError(413, "attachment_too_large", "The encrypted attachment is too large.");
+  }
+
+  return bytes;
+}
+
+function attachmentBucket(env: Env): R2Bucket {
+  const bucket = (env as Env & { ATTACHMENTS?: R2Bucket }).ATTACHMENTS;
+  if (!bucket) {
+    throw new HttpError(500, "attachments_not_configured", "Encrypted attachment storage is not configured.");
+  }
+
+  return bucket;
+}
+
 function expectRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new HttpError(400, "invalid_body", "The request body must be a JSON object.");
@@ -308,6 +896,34 @@ function expectNumber(value: unknown, field: string): number {
   }
 
   return value;
+}
+
+function expectInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new HttpError(400, "invalid_field", `${field} must be an integer.`);
+  }
+
+  return value;
+}
+
+function expectOptionalString(value: unknown, field: string, maxLength: number): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new HttpError(400, "invalid_field", `${field} must be a string.`);
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  if (trimmed.length > maxLength) {
+    throw new HttpError(400, "invalid_field", `${field} is too long.`);
+  }
+
+  return trimmed;
 }
 
 function clampTTL(value: number | undefined): number {
@@ -340,6 +956,37 @@ async function pepperPinProof(rawPinProof: Uint8Array, env: Env): Promise<Uint8A
   const signature = await crypto.subtle.sign("HMAC", key, proof);
 
   return new Uint8Array(signature);
+}
+
+async function sendFeedbackEmail(feedback: FeedbackBody, env: Env): Promise<void> {
+  const recipient = env.FEEDBACK_EMAIL || env.SUPPORT_EMAIL;
+  const from = env.FEEDBACK_FROM_EMAIL;
+  if (!recipient || !from) {
+    throw new HttpError(500, "feedback_not_configured", "Private feedback email is not configured.");
+  }
+
+  await env.FEEDBACK_EMAIL_SENDER.send({
+    from,
+    to: recipient,
+    subject: `cryptoscreen onboarding feedback (${feedback.rating}/5)`,
+    text: feedbackEmailText(feedback)
+  });
+}
+
+function feedbackEmailText(feedback: FeedbackBody): string {
+  return [
+    "cryptoscreen onboarding feedback",
+    "",
+    `Rating: ${feedback.rating}/5`,
+    `Timestamp: ${feedback.timestamp}`,
+    `App version: ${feedback.appVersion ?? "unknown"}`,
+    `Build number: ${feedback.buildNumber ?? "unknown"}`,
+    `Platform: ${feedback.platform ?? "unknown"}`,
+    `Device: ${feedback.device ?? "unknown"}`,
+    "",
+    "Feedback:",
+    feedback.message
+  ].join("\n");
 }
 
 function base64UrlToHex(value: string, field: string, minBytes: number, maxBytes: number): string {
@@ -408,6 +1055,28 @@ function parseCreateRow(value: unknown): CreateMessageRow {
   };
 }
 
+function parseAttachmentMetadataRow(value: unknown): AttachmentMetadataRow {
+  const row = expectDatabaseRecord(value);
+
+  return {
+    id: expectDatabaseString(row.id, "id"),
+    expires_at: expectDatabaseString(row.expires_at, "expires_at")
+  };
+}
+
+function parseMessageAttachmentStateRow(value: unknown): MessageAttachmentStateRow {
+  const row = expectDatabaseRecord(value);
+  const hasAttachment = row.has_attachment;
+  if (typeof hasAttachment !== "boolean") {
+    throw new HttpError(500, "invalid_database_result", "Attachment state returned an invalid value.");
+  }
+
+  return {
+    expires_at: expectNullableDatabaseString(row.expires_at, "expires_at"),
+    has_attachment: hasAttachment
+  };
+}
+
 function parseConsumeRow(value: unknown): ConsumeMessageRow {
   const row = expectDatabaseRecord(value);
   const status = expectDatabaseString(row.status, "status");
@@ -419,10 +1088,76 @@ function parseConsumeRow(value: unknown): ConsumeMessageRow {
   return {
     status,
     remaining_attempts: expectNullableDatabaseNumber(row.remaining_attempts, "remaining_attempts"),
+    retained: expectNullableDatabaseBoolean(row.retained, "retained"),
     ciphertext: expectNullableDatabaseString(row.ciphertext, "ciphertext"),
     nonce: expectNullableDatabaseString(row.nonce, "nonce"),
     tag: expectNullableDatabaseString(row.tag, "tag"),
-    salt: expectNullableDatabaseString(row.salt, "salt")
+    salt: expectNullableDatabaseString(row.salt, "salt"),
+    attachment_id: expectNullableDatabaseString(row.attachment_id, "attachment_id"),
+    attachment_object_key: expectNullableDatabaseString(row.attachment_object_key, "attachment_object_key"),
+    attachment_type: parseNullableAttachmentType(row.attachment_type),
+    attachment_content_type: parseNullableAttachmentContentType(row.attachment_content_type),
+    attachment_ciphertext_bytes: expectNullableDatabaseNumber(row.attachment_ciphertext_bytes, "attachment_ciphertext_bytes"),
+    attachment_encrypted_file_key: expectNullableDatabaseString(row.attachment_encrypted_file_key, "attachment_encrypted_file_key")
+  };
+}
+
+function parseConsumeRowWithoutAttachment(value: unknown): ConsumeMessageRow {
+  const row = expectDatabaseRecord(value);
+  const status = expectDatabaseString(row.status, "status");
+
+  if (!isConsumeStatus(status)) {
+    throw new HttpError(500, "invalid_database_result", "Consume returned an invalid status.");
+  }
+
+  return {
+    status,
+    remaining_attempts: expectNullableDatabaseNumber(row.remaining_attempts, "remaining_attempts"),
+    retained: expectNullableDatabaseBoolean(row.retained, "retained") ?? false,
+    ciphertext: expectNullableDatabaseString(row.ciphertext, "ciphertext"),
+    nonce: expectNullableDatabaseString(row.nonce, "nonce"),
+    tag: expectNullableDatabaseString(row.tag, "tag"),
+    salt: expectNullableDatabaseString(row.salt, "salt"),
+    attachment_id: null,
+    attachment_object_key: null,
+    attachment_type: null,
+    attachment_content_type: null,
+    attachment_ciphertext_bytes: null,
+    attachment_encrypted_file_key: null
+  };
+}
+
+function parseReadSessionRow(value: unknown): ReadSessionRow {
+  const row = expectDatabaseRecord(value);
+  const contentType = expectDatabaseString(row.content_type, "content_type");
+  if (!isAttachmentContentType(contentType)) {
+    throw new HttpError(500, "invalid_database_result", "Read session returned an invalid content type.");
+  }
+
+  return {
+    object_key: expectDatabaseString(row.object_key, "object_key"),
+    content_type: contentType,
+    ciphertext_bytes: expectDatabaseNumber(row.ciphertext_bytes, "ciphertext_bytes")
+  };
+}
+
+function parseMessageStatusRow(value: unknown): MessageStatusRow {
+  const row = expectDatabaseRecord(value);
+  const status = expectDatabaseString(row.status, "status");
+
+  if (status !== "active" && status !== "expired" && status !== "consumed") {
+    throw new HttpError(500, "invalid_database_result", "Message status returned an invalid value.");
+  }
+
+  return { status };
+}
+
+function parseMessageStatsRow(value: unknown): MessageStats {
+  const row = expectDatabaseRecord(value);
+
+  return {
+    sharedMessages: expectDatabaseCount(row.shared_messages, "shared_messages"),
+    updatedAt: expectNullableDatabaseString(row.updated_at, "updated_at")
   };
 }
 
@@ -450,6 +1185,20 @@ function expectDatabaseNumber(value: unknown, field: string): number {
   return value;
 }
 
+function expectDatabaseCount(value: unknown, field: string): number {
+  const count = typeof value === "number"
+    ? value
+    : typeof value === "string" && /^\d+$/.test(value)
+      ? Number(value)
+      : Number.NaN;
+
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new HttpError(500, "invalid_database_result", `The database field ${field} was invalid.`);
+  }
+
+  return count;
+}
+
 function expectNullableDatabaseString(value: unknown, field: string): string | null {
   if (value === null) {
     return null;
@@ -466,8 +1215,54 @@ function expectNullableDatabaseNumber(value: unknown, field: string): number | n
   return expectDatabaseNumber(value, field);
 }
 
+function expectNullableDatabaseBoolean(value: unknown, field: string): boolean | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new HttpError(500, "invalid_database_result", `The database field ${field} was invalid.`);
+  }
+
+  return value;
+}
+
 function isConsumeStatus(value: string): value is ConsumeMessageRow["status"] {
   return consumeStatuses.includes(value as ConsumeMessageRow["status"]);
+}
+
+function parseNullableAttachmentType(value: unknown): "image" | null {
+  if (value === null) {
+    return null;
+  }
+
+  const attachmentType = expectDatabaseString(value, "attachment_type");
+  if (attachmentType !== "image") {
+    throw new HttpError(500, "invalid_database_result", "Consume returned an invalid attachment type.");
+  }
+
+  return attachmentType;
+}
+
+function parseNullableAttachmentContentType(value: unknown): AttachmentContentType | null {
+  if (value === null) {
+    return null;
+  }
+
+  const contentType = expectDatabaseString(value, "attachment_content_type");
+  if (!isAttachmentContentType(contentType)) {
+    throw new HttpError(500, "invalid_database_result", "Consume returned an invalid attachment content type.");
+  }
+
+  return contentType;
+}
+
+function isAttachmentContentType(value: string): value is AttachmentContentType {
+  return attachmentContentTypes.includes(value as AttachmentContentType);
+}
+
+function isReadSessionEventType(value: string): value is ReadSessionEventBody["type"] {
+  return readSessionEventTypes.includes(value as ReadSessionEventBody["type"]);
 }
 
 function jsonResponse(data: unknown, status = 200, extraHeaders: HeadersInit = {}): Response {
@@ -518,8 +1313,10 @@ function appleAssociation(env: Env): unknown {
   };
 }
 
-function homePage(env: Env): string {
+async function homePage(env: Env): Promise<string> {
   const links = siteLinks(env);
+  const stats = await safeMessageStats(env);
+  const sharedMessages = stats ? formatStatNumber(stats.sharedMessages) : "...";
 
   return pageShell(
     "cryptoscreen",
@@ -551,6 +1348,20 @@ function homePage(env: Env): string {
           <p class="lede">
             Sealed messages for iPhone. The sender encrypts locally, shares a link and PIN, and the recipient gets one controlled read before the row disappears.
           </p>
+          <div class="stat-strip" aria-label="cryptoscreen stats">
+            <div class="stat-item">
+              <span class="stat-value" data-shared-messages aria-live="polite">${sharedMessages}</span>
+              <span class="stat-label">messages shared</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">1</span>
+              <span class="stat-label">read per link</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">${LINK_RETENTION_DAYS}</span>
+              <span class="stat-label">day maximum</span>
+            </div>
+          </div>
           <div class="actions">
             <a class="button primary" href="${escapeAttribute(links.appStoreUrl)}">Open on App Store</a>
             <a class="button" href="/support">Support</a>
@@ -566,7 +1377,8 @@ function homePage(env: Env): string {
         </div>
         <div class="copy-stack">
           <p>The server stores encrypted bytes, attempt metadata, and an expiry time. It does not receive the plaintext, the link secret, contact lists, or account profiles.</p>
-          <p>A correct PIN consumes the message. The third wrong PIN destroys it. Unused links expire after ${LINK_RETENTION_DAYS} days.</p>
+          <p>A correct PIN consumes the server row. The third wrong PIN destroys it. Unused links expire after ${LINK_RETENTION_DAYS} days.</p>
+          <p>If iOS reports a screenshot while a note is open, cryptoscreen immediately wipes the visible reader session. Screenshot detection is best-effort and cannot protect against external cameras or compromised devices.</p>
         </div>
       </section>
       <section class="section steps" aria-label="How cryptoscreen works">
@@ -583,7 +1395,7 @@ function homePage(env: Env): string {
         <article>
           <span>03</span>
           <h3>Read once</h3>
-          <p>The reader reveals a narrow window, with capture redaction and no selectable plaintext.</p>
+          <p>The reader reveals a narrow window, with capture redaction, screenshot-triggered destruction, and no selectable plaintext.</p>
         </article>
       </section>
       <section class="section apple-strip">
@@ -598,7 +1410,9 @@ function homePage(env: Env): string {
           <a href="/m/example-message-id">Universal link page</a>
         </nav>
       </section>
-    `
+    `,
+    undefined,
+    homeStatsScript()
   );
 }
 
@@ -618,7 +1432,7 @@ function messagePage(url: URL, env: Env): string {
           This link points to message <code>${messageID}</code>. Open it on iPhone with cryptoscreen or the App Clip, then enter the six-digit PIN from the sender.
         </p>
         <p class="note">
-          The decryption secret belongs in the URL fragment after <code>#s=</code>. Browsers do not send that fragment to this server.
+          The decryption secret belongs in the URL fragment after <code>#s=</code>. Browsers do not send that fragment to this server. If iOS reports a screenshot while the note is open, the app destroys the visible reader session.
         </p>
         <div class="actions">
           <a class="button primary" data-open-message href="${escapeAttribute(messageUrl)}">Open message</a>
@@ -647,7 +1461,11 @@ function privacyPage(env: Env): string {
         <h1>cryptoscreen Privacy Policy</h1>
         <p>cryptoscreen is designed for one-time encrypted messages. Message plaintext is encrypted on the sender device before upload and is not stored by the service.</p>
         <h2>What the service stores</h2>
-        <p>The production API stores encrypted message bytes, nonce, tag, salt, expiry time, and failed attempt count. Rows are deleted after a successful read, after the third wrong PIN, or after expiry cleanup. Unused links expire after ${LINK_RETENTION_DAYS} days.</p>
+        <p>The production API stores encrypted message bytes, nonce, tag, salt, expiry time, and failed attempt count. When a sender attaches an image, the service stores encrypted image object bytes in private R2 storage plus encrypted attachment metadata in Neon. User message rows and attachment metadata are deleted after a successful read, after the third wrong PIN, or after expiry cleanup. Unused user links expire after ${LINK_RETENTION_DAYS} days.</p>
+        <p>After a successful read with an image attachment, the app downloads the encrypted image bytes through a one-time read session. The R2 object is deleted after that one-time download. Expired attachment objects are deleted by scheduled cleanup.</p>
+        <p>Service-owned retained review/demo rows may remain reusable for Apple App Review and TestFlight invocation testing. These rows must contain only demo text, not private user content.</p>
+        <p>The service also keeps an aggregate count of how many sealed messages have been shared. That counter does not include message content, recipients, senders, or link secrets.</p>
+        <p>If you send feedback from inside the app, the service processes the rating, feedback text, app version/build, platform/device information, and timestamp to deliver that support request to the maintainer.</p>
         <h2>What is not stored</h2>
         <p>The service does not intentionally store plaintext message content, the URL fragment secret, contact lists, or account profiles.</p>
         <h2>Operational data</h2>
@@ -671,7 +1489,7 @@ function supportPage(env: Env): string {
         <h1>cryptoscreen Support</h1>
         <p>For help with TestFlight builds, message links, or deletion behavior, contact <a href="mailto:${escapeAttribute(links.supportEmail)}">${escapeHtml(links.supportEmail)}</a>.</p>
         <h2>Current beta behavior</h2>
-        <p>Messages delete after one successful read, after the third wrong PIN, or after ${LINK_RETENTION_DAYS} days if never opened.</p>
+        <p>User messages delete after one successful read, after the third wrong PIN, or after ${LINK_RETENTION_DAYS} days if never opened. Encrypted image attachment objects delete after their one-time attachment download or during scheduled expiry cleanup. Service-owned review/demo rows may be retained so Apple and TestFlight testers can repeatedly verify App Clip invocation.</p>
         <h2>Project links</h2>
         <p>
           Follow development on <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a> or contact the maintainer on <a href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>.
@@ -697,7 +1515,7 @@ function notFoundPage(env: Env): string {
   );
 }
 
-function pageShell(title: string, env: Env, content: string, appArgument?: string): string {
+function pageShell(title: string, env: Env, content: string, appArgument?: string, bodyScript = ""): string {
   const escapedTitle = escapeHtml(title);
   const description = "cryptoscreen seals one-time encrypted messages for private reading on iPhone.";
   const links = siteLinks(env);
@@ -854,6 +1672,35 @@ function pageShell(title: string, env: Env, content: string, appArgument?: strin
         font-size: clamp(18px, 3.2vw, 24px);
         line-height: 1.45;
         max-width: 650px;
+      }
+      .stat-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(116px, max-content));
+        gap: 14px 26px;
+        margin-top: 28px;
+      }
+      .stat-item {
+        border-left: 1px solid var(--line-strong);
+        min-width: 116px;
+        padding-left: 14px;
+      }
+      .stat-value {
+        color: var(--ink);
+        display: block;
+        font-size: clamp(26px, 5vw, 40px);
+        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        line-height: 1;
+        min-height: 1em;
+      }
+      .stat-label {
+        color: var(--muted);
+        display: block;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.35;
+        margin-top: 8px;
+        text-transform: uppercase;
       }
       .actions {
         display: flex;
@@ -1055,6 +1902,16 @@ function pageShell(title: string, env: Env, content: string, appArgument?: strin
             linear-gradient(90deg, var(--bg) 0%, oklch(7% 0.014 154 / 0.78) 68%, oklch(7% 0.014 154 / 0.26) 100%);
         }
         .hero-copy { padding: 24px; }
+        .stat-strip {
+          gap: 12px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .stat-item {
+          min-width: 0;
+          padding-left: 10px;
+        }
+        .stat-value { font-size: 24px; }
+        .stat-label { font-size: 10px; }
         .actions { align-items: stretch; flex-direction: column; }
         .button { width: 100%; }
         .reader-scene { padding: 24px 16px; }
@@ -1099,8 +1956,13 @@ function pageShell(title: string, env: Env, content: string, appArgument?: strin
         </span>
       </footer>
     </div>
+    ${bodyScript}
   </body>
 </html>`;
+}
+
+function formatStatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function smartBannerContent(env: Env, appArgument?: string): string {
@@ -1115,7 +1977,7 @@ function smartBannerContent(env: Env, appArgument?: string): string {
 
 function messageUrlWithoutFragment(url: URL, env: Env): string {
   const baseUrl = siteBaseUrl(env);
-  return `${baseUrl.origin}${url.pathname}`;
+  return `${baseUrl.origin}${url.pathname}${url.search}`;
 }
 
 function siteBaseUrl(env: Env): URL {
@@ -1131,6 +1993,43 @@ function siteBaseUrl(env: Env): URL {
   }
 
   return new URL("https://cryptoscreen.app");
+}
+
+function homeStatsScript(): string {
+  return `<script>
+(() => {
+  const value = document.querySelector("[data-shared-messages]");
+  if (!value) return;
+
+  const format = (raw) => {
+    const count = Number(raw);
+    if (!Number.isFinite(count) || count < 0) return null;
+    return new Intl.NumberFormat("en-US").format(count);
+  };
+
+  const refresh = async () => {
+    try {
+      const response = await fetch("/api/stats", {
+        cache: "no-store",
+        headers: { Accept: "application/json" }
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      const formatted = format(data.sharedMessages);
+      if (formatted) value.textContent = formatted;
+    } catch {
+      // Leave the server-rendered count in place.
+    }
+  };
+
+  window.setInterval(refresh, 30000);
+  window.addEventListener("focus", refresh);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refresh();
+  });
+  refresh();
+})();
+</script>`;
 }
 
 function fragmentForwardingScript(): string {

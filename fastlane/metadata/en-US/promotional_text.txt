@@ -1,0 +1,1 @@
+Send encrypted notes that can be opened once, protected by a separate PIN and a guarded reading view.

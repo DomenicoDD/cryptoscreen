@@ -21,6 +21,12 @@
   "triggers": {
     "crons": ["17 * * * *"]
   },
+  "r2_buckets": [
+    {
+      "binding": "ATTACHMENTS",
+      "bucket_name": "cryptoscreen-attachments"
+    }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
@@ -35,8 +41,17 @@
     "GITHUB_REPOSITORY_URL": "https://github.com/DomenicoDD/cryptoscreen",
     "TESTFLIGHT_PUBLIC_URL": "https://testflight.apple.com/join/ykqncUF5",
     "X_PROFILE_URL": "https://x.com/DomenicoDD",
-    "SUPPORT_EMAIL": "domenico@cryptoscreen.app"
+    "SUPPORT_EMAIL": "domenico@cryptoscreen.app",
+    "FEEDBACK_EMAIL": "domenico@cryptoscreen.app",
+    "FEEDBACK_FROM_EMAIL": "feedback@cryptoscreen.app"
   },
+  "send_email": [
+    {
+      "name": "FEEDBACK_EMAIL_SENDER",
+      "destination_address": "domenico@cryptoscreen.app",
+      "allowed_sender_addresses": ["feedback@cryptoscreen.app"]
+    }
+  ],
   "secrets": {
     "required": ["DATABASE_URL", "SERVER_PIN_PEPPER"]
   },

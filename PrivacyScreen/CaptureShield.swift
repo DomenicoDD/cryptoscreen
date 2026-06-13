@@ -53,8 +53,13 @@ struct CaptureShield<Content: View>: View {
   @StateObject private var monitor = ScreenCaptureMonitor()
 
   let content: Content
+  let onScreenshotDetected: () -> Void
 
-  init(@ViewBuilder content: () -> Content) {
+  init(
+    onScreenshotDetected: @escaping () -> Void = {},
+    @ViewBuilder content: () -> Content
+  ) {
+    self.onScreenshotDetected = onScreenshotDetected
     self.content = content()
   }
 
@@ -97,5 +102,10 @@ struct CaptureShield<Content: View>: View {
     }
     .privacySensitive()
     .animation(.easeOut(duration: 0.12), value: shouldRedact)
+    .onChange(of: monitor.redactsAfterScreenshot) { _, isRedacting in
+      if isRedacting {
+        onScreenshotDetected()
+      }
+    }
   }
 }

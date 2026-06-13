@@ -20,3 +20,5 @@ wrangler.jsonc
 !*.example
 secrets*.json
 src/worker-configuration.d.ts
+fastlane/report.xml
+fastlane/metadata/review_information/

@@ -15,10 +15,14 @@ The current app is intentionally small and native. It encrypts messages on devic
 - Delete unopened links after 30 days.
 - Render the plaintext through the privacy reader without selectable text.
 - Redact the app while screen recording, mirroring, app switching, or shortly after screenshot detection.
+- Destroy the visible reader session after iOS reports a screenshot.
 - Avoid putting plaintext into logs, clipboard actions, share sheets, or accessibility labels.
 - Serve `cryptoscreen.app`, support/privacy pages, and Apple association metadata from Cloudflare Workers.
+- V2 design work for Pro encrypted image attachments is tracked in [docs/V2_PRO_IMAGES.md](docs/V2_PRO_IMAGES.md).
 
 The app talks only to `https://cryptoscreen.app/api`. It must never connect directly to Neon.
+
+If you want the backend explained as a lesson, start with [docs/DATABASE_AND_STORAGE.md](docs/DATABASE_AND_STORAGE.md). It explains what is safe to expose in an open-source repo, what the database stores, and how encrypted image objects are deleted from R2.
 
 ## Security Model
 
@@ -32,8 +36,11 @@ The production model is:
 - A correct PIN atomically returns ciphertext and deletes the row.
 - The third wrong PIN atomically deletes the row.
 - Unopened links expire and are deleted after 30 days.
+- Service-owned retained demo/review rows can be reused for App Review and TestFlight invocation testing.
 
 Read the detailed design in [docs/SECURITY.md](docs/SECURITY.md).
+
+The checked-in database schema is intentionally public in [database/schema.sql](database/schema.sql). It contains structure and deletion logic, not production credentials or user data.
 
 ## App Clip Direction
 
@@ -124,8 +131,15 @@ The Worker serves:
 - `/support` App Store support URL
 - `/m/<message-id>` universal link and App Clip invocation page
 - `/.well-known/apple-app-site-association`
+- `/api/stats`
+- `/api/feedback`
 - `/api/messages`
+- `/api/messages/<message-id>/attachment`
 - `/api/messages/<message-id>/consume`
+- `/api/read-sessions/<read-session-id>/attachment`
+- `/api/read-sessions/<read-session-id>/events`
+
+V2 encrypted image attachments use a private Cloudflare R2 bucket bound to the Worker as `ATTACHMENTS`. The bucket must not be public; all upload and download access goes through the Worker. The checked-in `wrangler.example.jsonc` includes the required binding shape.
 
 Optional public-site variables:
 
@@ -133,7 +147,11 @@ Optional public-site variables:
 GITHUB_REPOSITORY_URL
 X_PROFILE_URL
 SUPPORT_EMAIL
+FEEDBACK_EMAIL
+FEEDBACK_FROM_EMAIL
 ```
+
+`/api/feedback` sends onboarding feedback through a server-side Cloudflare `send_email` binding named `FEEDBACK_EMAIL_SENDER`. The iOS app never receives SMTP or email-provider credentials.
 
 ## Project Structure
 
@@ -152,7 +170,9 @@ PrivacyScreenClip/
 database/
   schema.sql                   Neon/Postgres schema and atomic consume function
 docs/
+  DATABASE_AND_STORAGE.md      Beginner-friendly backend and storage walkthrough
   SECURITY.md                  Threat model and production API/database design
+  V2_PRO_IMAGES.md             Pro encrypted image attachment architecture
 .github/
   ISSUE_TEMPLATE/              Public issue templates
   PULL_REQUEST_TEMPLATE.md     Contributor pull request checklist
@@ -163,7 +183,7 @@ wrangler.example.jsonc         Copyable Worker config template
 
 ## Important Limitations
 
-- Normal screenshots cannot be prevented reliably with public iOS APIs. The app can redact after screenshot notification and during screen recording/mirroring.
+- Normal screenshots cannot be prevented reliably with public iOS APIs. The app can redact and destroy the visible reader session after screenshot notification, and it can redact during screen recording/mirroring.
 - The App Clip target is present and builds locally, but still needs production invocation testing from a real App Clip URL.
 - Associated Domains and App Clip capabilities must be enabled for the Apple App IDs before TestFlight/App Store signing with entitlements.
 - A six-digit PIN is not enough by itself. The design requires the high-entropy link secret plus the PIN.
