@@ -249,7 +249,7 @@ struct PrivacyReaderView: View {
   }
 }
 
-private struct RevealTouchCaptureView: UIViewRepresentable {
+struct RevealTouchCaptureView: UIViewRepresentable {
   let onActiveChanged: (Bool) -> Void
 
   func makeUIView(context: Context) -> RevealTouchCaptureUIView {
@@ -267,7 +267,7 @@ private struct RevealTouchCaptureView: UIViewRepresentable {
   }
 }
 
-private final class RevealTouchCaptureUIView: UIView {
+final class RevealTouchCaptureUIView: UIView {
   var onActiveChanged: ((Bool) -> Void)?
 
   private var activeTouchIDs: Set<ObjectIdentifier> = []
@@ -500,18 +500,33 @@ private struct ReaderChrome: View {
   }
 }
 
-private struct RevealTouchTestButton: View {
+struct RevealTouchTestButton: View {
   let isRevealActive: Bool
   let showsHint: Bool
   let frame: CGRect
 
+  @State private var activePulse = false
+
   var body: some View {
-    HStack(spacing: 0) {
-      if showsHint {
-        Text("Cover this part with your hand")
-          .font(.system(size: 15, weight: .semibold, design: .rounded))
-          .lineLimit(1)
-          .minimumScaleFactor(0.78)
+    ZStack {
+      RoundedRectangle(cornerRadius: 8)
+        .fill(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(isRevealActive ? (activePulse ? 0.18 : 0.10) : 0))
+
+      if isRevealActive {
+        Capsule()
+          .fill(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.72))
+          .frame(width: max(54, frame.width * 0.22), height: 2)
+          .offset(x: activePulse ? frame.width * 0.34 : -frame.width * 0.34)
+          .shadow(color: Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.46), radius: 8)
+      }
+
+      HStack(spacing: 0) {
+        if showsHint {
+          Text("Cover this part with your hand")
+            .font(.system(size: 15, weight: .semibold, design: .rounded))
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+        }
       }
     }
     .frame(width: frame.width, height: frame.height)
@@ -528,7 +543,27 @@ private struct RevealTouchTestButton: View {
     .position(x: frame.midX, y: frame.midY)
     .animation(.easeInOut(duration: 0.18), value: isRevealActive)
     .animation(.easeOut(duration: 0.22), value: showsHint)
+    .onAppear {
+      updateActiveAnimation()
+    }
+    .onChange(of: isRevealActive) { _, _ in
+      updateActiveAnimation()
+    }
     .accessibilityLabel("Reveal test area")
+  }
+
+  private func updateActiveAnimation() {
+    guard isRevealActive else {
+      withAnimation(.easeOut(duration: 0.16)) {
+        activePulse = false
+      }
+      return
+    }
+
+    activePulse = false
+    withAnimation(.easeInOut(duration: 0.86).repeatForever(autoreverses: true)) {
+      activePulse = true
+    }
   }
 }
 

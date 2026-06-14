@@ -23,6 +23,7 @@ create table if not exists cryptoscreen.sealed_messages (
   tag bytea not null,
   salt bytea not null,
   pin_verifier bytea not null,
+  revoke_verifier bytea,
   failed_attempts smallint not null default 0,
   max_attempts smallint not null default 3,
   retained boolean not null default false,
@@ -30,6 +31,8 @@ create table if not exists cryptoscreen.sealed_messages (
   created_at timestamptz not null default now(),
   constraint sealed_messages_attempts_check
     check (failed_attempts >= 0 and max_attempts > 0 and failed_attempts <= max_attempts),
+  constraint sealed_messages_revoke_verifier_check
+    check (revoke_verifier is null or octet_length(revoke_verifier) = 32),
   constraint sealed_messages_expiry_check
     check (expires_at > created_at)
 );
@@ -39,6 +42,19 @@ create index if not exists sealed_messages_expires_at_idx
 
 alter table cryptoscreen.sealed_messages
   add column if not exists retained boolean not null default false;
+
+alter table cryptoscreen.sealed_messages
+  add column if not exists revoke_verifier bytea;
+
+do $$
+begin
+  alter table cryptoscreen.sealed_messages
+    add constraint sealed_messages_revoke_verifier_check
+    check (revoke_verifier is null or octet_length(revoke_verifier) = 32);
+exception
+  when duplicate_object then null;
+end;
+$$;
 
 create table if not exists cryptoscreen.message_stats (
   id boolean primary key default true,
@@ -116,6 +132,21 @@ create table if not exists cryptoscreen.sealed_message_read_session_events (
 create index if not exists sealed_message_read_session_events_session_idx
   on cryptoscreen.sealed_message_read_session_events (read_session_id, received_at);
 
+create table if not exists cryptoscreen.sealed_message_delivery_audit (
+  message_id uuid primary key,
+  has_image_attachment boolean not null default false,
+  text_consumed_at timestamptz,
+  image_consumed_at timestamptz,
+  screenshot_detected_at timestamptz,
+  expired_at timestamptz,
+  destroyed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists sealed_message_delivery_audit_updated_at_idx
+  on cryptoscreen.sealed_message_delivery_audit (updated_at);
+
 insert into cryptoscreen.message_stats (id, shared_messages)
 values (true, (select count(*) from cryptoscreen.sealed_messages))
 on conflict (id) do nothing;
@@ -144,6 +175,28 @@ create trigger sealed_messages_record_shared
 after insert on cryptoscreen.sealed_messages
 for each row
 execute function cryptoscreen.record_sealed_message_shared();
+
+create or replace function cryptoscreen.record_sealed_message_delivery_audit()
+returns trigger
+language plpgsql
+security definer
+set search_path = cryptoscreen, pg_temp
+as $$
+begin
+  insert into cryptoscreen.sealed_message_delivery_audit (message_id, created_at, updated_at)
+  values (new.id, new.created_at, now())
+  on conflict (message_id) do nothing;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists sealed_messages_record_delivery_audit on cryptoscreen.sealed_messages;
+
+create trigger sealed_messages_record_delivery_audit
+after insert on cryptoscreen.sealed_messages
+for each row
+execute function cryptoscreen.record_sealed_message_delivery_audit();
 
 drop function if exists cryptoscreen.consume_sealed_message(uuid, bytea);
 
@@ -189,6 +242,12 @@ begin
   end if;
 
   if not sealed.retained and sealed.expires_at <= now() then
+    update cryptoscreen.sealed_message_delivery_audit
+    set
+      expired_at = coalesce(expired_at, now()),
+      updated_at = now()
+    where message_id = p_id;
+
     delete from cryptoscreen.sealed_messages where id = p_id;
     status := 'expired';
     remaining_attempts := 0;
@@ -203,6 +262,13 @@ begin
     from cryptoscreen.sealed_message_attachments
     where message_id = p_id
     limit 1;
+
+    update cryptoscreen.sealed_message_delivery_audit
+    set
+      text_consumed_at = coalesce(text_consumed_at, now()),
+      has_image_attachment = has_image_attachment or attachment.id is not null,
+      updated_at = now()
+    where message_id = p_id;
 
     if not sealed.retained then
       delete from cryptoscreen.sealed_messages where id = p_id;
@@ -238,6 +304,12 @@ begin
   end if;
 
   if sealed.failed_attempts + 1 >= sealed.max_attempts then
+    update cryptoscreen.sealed_message_delivery_audit
+    set
+      destroyed_at = coalesce(destroyed_at, now()),
+      updated_at = now()
+    where message_id = p_id;
+
     delete from cryptoscreen.sealed_messages where id = p_id;
     status := 'destroyed';
     remaining_attempts := 0;
@@ -269,6 +341,17 @@ declare
   deleted_messages bigint;
   deleted_sessions bigint;
 begin
+  update cryptoscreen.sealed_message_delivery_audit
+  set
+    expired_at = coalesce(expired_at, now()),
+    updated_at = now()
+  where message_id in (
+    select id
+    from cryptoscreen.sealed_messages
+    where not retained
+      and expires_at <= now()
+  );
+
   delete from cryptoscreen.sealed_messages
   where not retained
     and expires_at <= now();

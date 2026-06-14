@@ -13,6 +13,7 @@ struct SealedMessageAPI {
       tag: upload.tag.base64URLEncodedString(),
       salt: upload.salt.base64URLEncodedString(),
       pinProof: upload.pinProof.base64URLEncodedString(),
+      revokeProof: upload.revokeProof.base64URLEncodedString(),
       ttlSeconds: Int(SealedMessageCrypto.defaultTimeToLive)
     )
     let response: CreateMessageResponse = try await send(
@@ -86,7 +87,8 @@ struct SealedMessageAPI {
           OpenedSealedMessage(
             plaintext: plaintext,
             attachment: attachment,
-            retained: response.retained ?? false
+            retained: response.retained ?? false,
+            eventPath: response.eventPath
           )
         )
       case "wrong_pin":
@@ -115,13 +117,40 @@ struct SealedMessageAPI {
     )
   }
 
-  func status(messageID: UUID) async throws -> SealedMessageRemoteStatus {
+  func status(messageID: UUID) async throws -> SealedMessageRemoteDeliveryStatus {
     let response: MessageStatusResponse = try await send(
       path: "/api/messages/\(messageID.uuidString.lowercased())/status",
       method: "GET"
     )
 
-    return SealedMessageRemoteStatus(rawValue: response.status) ?? .consumed
+    return SealedMessageRemoteDeliveryStatus(
+      status: SealedMessageRemoteStatus(rawValue: response.status) ?? .consumed,
+      textConsumed: response.textConsumed ?? false,
+      imageAttachmentAttached: response.imageAttachmentAttached ?? false,
+      imageAttachmentConsumed: response.imageAttachmentConsumed ?? false,
+      screenshotDetected: response.screenshotDetected ?? false
+    )
+  }
+
+  func expire(message: SentMessageRecord) async throws -> SealedMessageRemoteDeliveryStatus {
+    guard let request = SealedMessageCrypto.request(from: message.link) else {
+      throw SealedMessageAPIError.invalidResponse
+    }
+
+    let body = ExpireMessageRequest(revokeProof: SealedMessageCrypto.revokeProof(request: request).base64URLEncodedString())
+    let response: MessageStatusResponse = try await send(
+      path: "/api/messages/\(message.id.uuidString.lowercased())/expire",
+      method: "POST",
+      body: body
+    )
+
+    return SealedMessageRemoteDeliveryStatus(
+      status: SealedMessageRemoteStatus(rawValue: response.status) ?? .expired,
+      textConsumed: response.textConsumed ?? false,
+      imageAttachmentAttached: response.imageAttachmentAttached ?? false,
+      imageAttachmentConsumed: response.imageAttachmentConsumed ?? false,
+      screenshotDetected: response.screenshotDetected ?? false
+    )
   }
 
   func submitFeedback(
@@ -281,10 +310,19 @@ struct SealedMessageAPI {
   }
 }
 
-enum SealedMessageRemoteStatus: String {
+enum SealedMessageRemoteStatus: String, Codable {
   case active
   case consumed
   case expired
+  case destroyed
+}
+
+struct SealedMessageRemoteDeliveryStatus: Equatable {
+  let status: SealedMessageRemoteStatus
+  let textConsumed: Bool
+  let imageAttachmentAttached: Bool
+  let imageAttachmentConsumed: Bool
+  let screenshotDetected: Bool
 }
 
 private struct CreateMessageRequest: Encodable {
@@ -293,6 +331,7 @@ private struct CreateMessageRequest: Encodable {
   let tag: String
   let salt: String
   let pinProof: String
+  let revokeProof: String
   let ttlSeconds: Int
 }
 
@@ -306,6 +345,10 @@ private struct ConsumeMessageRequest: Encodable {
   let pinProof: String
 }
 
+private struct ExpireMessageRequest: Encodable {
+  let revokeProof: String
+}
+
 private struct ConsumeMessageResponse: Decodable {
   let status: String
   let remainingAttempts: Int
@@ -314,6 +357,7 @@ private struct ConsumeMessageResponse: Decodable {
   let nonce: String?
   let tag: String?
   let salt: String?
+  let eventPath: String?
   let attachment: ConsumeAttachmentResponse?
 }
 
@@ -330,6 +374,10 @@ private struct ConsumeAttachmentResponse: Decodable {
 
 private struct MessageStatusResponse: Decodable {
   let status: String
+  let textConsumed: Bool?
+  let imageAttachmentAttached: Bool?
+  let imageAttachmentConsumed: Bool?
+  let screenshotDetected: Bool?
 }
 
 private struct SubmitFeedbackRequest: Encodable {

@@ -4,12 +4,12 @@ import StoreKit
 import UIKit
 
 private let defaultComposeMessage = "Meet me by the north entrance after the second bell. Read this once, then let it burn."
-private let onboardingComposeMessage = "Hey, I'm testing this cryptoscreen app. We can send each other messages that self destroy, so we can share things that will not last."
 private let sealedMessageShareSubject = "cryptoscreen sealed note"
 private let sealedMessageShareWarning = "There is an encrypted self-destroying note waiting for you. Beware: if you take a screenshot, the message will be destroyed."
 private let maxMessageCharacterCount = 10_000
 private let maxFeedbackCharacterCount = 2_000
 private let proImageAttachmentsEnabled = true
+private let demoCardImageAssetName = "DemoCard"
 private let sentMessagesStorageKey = "cryptoscreen.sentMessages"
 private let onboardingReaderMessage = """
 This is a cryptoscreen message.
@@ -27,10 +27,15 @@ private func sealedMessageShareText(for link: URL) -> String {
   "\(sealedMessageShareWarning)\n\n\(link.absoluteString)"
 }
 
+private func demoCardImageData() -> Data? {
+  UIImage(named: demoCardImageAssetName)?.pngData()
+}
+
 enum SentMessageStatus: String, Codable {
   case active
   case consumed
   case expired
+  case destroyed
 
   var label: String {
     switch self {
@@ -40,6 +45,36 @@ enum SentMessageStatus: String, Codable {
       return "Consumed"
     case .expired:
       return "Expired"
+    case .destroyed:
+      return "Destroyed"
+    }
+  }
+
+  var tint: Color {
+    switch self {
+    case .active:
+      return Color(red: 0.48, green: 1.0, blue: 0.70)
+    case .consumed:
+      return Color(red: 0.84, green: 0.92, blue: 1.0)
+    case .expired:
+      return Color(red: 1.0, green: 0.68, blue: 0.38)
+    case .destroyed:
+      return Color(red: 1.0, green: 0.42, blue: 0.42)
+    }
+  }
+}
+
+private extension SentMessageStatus {
+  init(_ remoteStatus: SealedMessageRemoteStatus) {
+    switch remoteStatus {
+    case .active:
+      self = .active
+    case .consumed:
+      self = .consumed
+    case .expired:
+      self = .expired
+    case .destroyed:
+      self = .destroyed
     }
   }
 }
@@ -50,7 +85,66 @@ struct SentMessageRecord: Identifiable, Codable, Equatable {
   let pin: String
   let createdAt: Date
   let characterCount: Int
+  var hasImageAttachment: Bool
+  var textConsumed: Bool
+  var imageConsumed: Bool
+  var screenshotDetected: Bool
   var status: SentMessageStatus
+
+  var isFullyConsumed: Bool {
+    textConsumed && (!hasImageAttachment || imageConsumed)
+  }
+
+  init(
+    id: UUID,
+    link: URL,
+    pin: String,
+    createdAt: Date,
+    characterCount: Int,
+    hasImageAttachment: Bool = false,
+    textConsumed: Bool = false,
+    imageConsumed: Bool = false,
+    screenshotDetected: Bool = false,
+    status: SentMessageStatus
+  ) {
+    self.id = id
+    self.link = link
+    self.pin = pin
+    self.createdAt = createdAt
+    self.characterCount = characterCount
+    self.hasImageAttachment = hasImageAttachment
+    self.textConsumed = textConsumed
+    self.imageConsumed = imageConsumed
+    self.screenshotDetected = screenshotDetected
+    self.status = status
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case link
+    case pin
+    case createdAt
+    case characterCount
+    case hasImageAttachment
+    case textConsumed
+    case imageConsumed
+    case screenshotDetected
+    case status
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    link = try container.decode(URL.self, forKey: .link)
+    pin = try container.decode(String.self, forKey: .pin)
+    createdAt = try container.decode(Date.self, forKey: .createdAt)
+    characterCount = try container.decode(Int.self, forKey: .characterCount)
+    hasImageAttachment = try container.decodeIfPresent(Bool.self, forKey: .hasImageAttachment) ?? false
+    textConsumed = try container.decodeIfPresent(Bool.self, forKey: .textConsumed) ?? false
+    imageConsumed = try container.decodeIfPresent(Bool.self, forKey: .imageConsumed) ?? false
+    screenshotDetected = try container.decodeIfPresent(Bool.self, forKey: .screenshotDetected) ?? false
+    status = try container.decode(SentMessageStatus.self, forKey: .status)
+  }
 }
 
 @MainActor
@@ -100,6 +194,7 @@ final class SealedMessageStore: ObservableObject {
         pin: createdMessage.pin,
         createdAt: Date(),
         characterCount: message.count,
+        hasImageAttachment: createdMessage.hasImageAttachment,
         status: .active
       )
     )
@@ -128,19 +223,21 @@ final class SealedMessageStore: ObservableObject {
     await api.reportReadSessionEvent(eventPath: eventPath)
   }
 
+  func expireSentMessage(_ message: SentMessageRecord) async throws {
+    let remoteStatus = try await api.expire(message: message)
+    updateSentMessageDeliveryStatus(id: message.id, remoteStatus: remoteStatus)
+  }
+
+  func deleteSentMessage(id: UUID) {
+    sentMessages.removeAll { $0.id == id }
+    persistSentMessages()
+  }
+
   func refreshSentMessageStatuses() async {
-    for message in sentMessages where message.status == .active {
+    for message in sentMessages where message.status == .active || message.status == .consumed {
       do {
         let remoteStatus = try await api.status(messageID: message.id)
-
-        switch remoteStatus {
-        case .active:
-          updateSentMessageStatus(id: message.id, status: .active)
-        case .consumed:
-          updateSentMessageStatus(id: message.id, status: .consumed)
-        case .expired:
-          updateSentMessageStatus(id: message.id, status: .expired)
-        }
+        updateSentMessageDeliveryStatus(id: message.id, remoteStatus: remoteStatus)
       } catch {
         continue
       }
@@ -171,9 +268,18 @@ final class SealedMessageStore: ObservableObject {
 
     switch result {
     case .expired:
-      updateSentMessageStatus(id: messageID, status: .expired)
+      updateSentMessageStatus(id: messageID, status: .expired, textConsumed: false, imageConsumed: false)
+    case .opened(let openedMessage):
+      updateSentMessageStatus(
+        id: messageID,
+        status: .consumed,
+        textConsumed: true,
+        imageConsumed: openedMessage.attachment != nil
+      )
+    case .destroyed:
+      updateSentMessageStatus(id: messageID, status: .destroyed, textConsumed: false, imageConsumed: false)
     default:
-      updateSentMessageStatus(id: messageID, status: .consumed)
+      updateSentMessageStatus(id: messageID, status: .consumed, textConsumed: true, imageConsumed: false)
     }
   }
 
@@ -183,12 +289,31 @@ final class SealedMessageStore: ObservableObject {
     persistSentMessages()
   }
 
-  private func updateSentMessageStatus(id: UUID, status: SentMessageStatus) {
+  private func updateSentMessageStatus(id: UUID, status: SentMessageStatus, textConsumed: Bool? = nil, imageConsumed: Bool? = nil) {
     guard let index = sentMessages.firstIndex(where: { $0.id == id }) else {
       return
     }
 
     sentMessages[index].status = status
+    if let textConsumed {
+      sentMessages[index].textConsumed = textConsumed
+    }
+    if let imageConsumed {
+      sentMessages[index].imageConsumed = imageConsumed
+    }
+    persistSentMessages()
+  }
+
+  private func updateSentMessageDeliveryStatus(id: UUID, remoteStatus: SealedMessageRemoteDeliveryStatus) {
+    guard let index = sentMessages.firstIndex(where: { $0.id == id }) else {
+      return
+    }
+
+    sentMessages[index].status = SentMessageStatus(remoteStatus.status)
+    sentMessages[index].hasImageAttachment = sentMessages[index].hasImageAttachment || remoteStatus.imageAttachmentAttached
+    sentMessages[index].textConsumed = remoteStatus.textConsumed
+    sentMessages[index].imageConsumed = remoteStatus.imageAttachmentConsumed
+    sentMessages[index].screenshotDetected = remoteStatus.screenshotDetected
     persistSentMessages()
   }
 
@@ -275,7 +400,11 @@ struct SealedMessageRootView: View {
                     incomingLink = link.absoluteString
                   },
                   onTestMessage: { message, plaintext, imageData in
-                    senderPreviewSession = SenderPreviewSession(message: plaintext, imageData: imageData, link: message.link)
+                    senderPreviewSession = SenderPreviewSession(
+                      message: plaintext,
+                      imageData: imageData ?? demoCardImageData(),
+                      link: message.link
+                    )
                   }
                 )
               case .open:
@@ -365,7 +494,7 @@ private struct HeaderView: View {
           Button {
             onShowOnboarding()
           } label: {
-            Label("Watch onboarding", systemImage: "play.rectangle")
+            Label("Onboarding", systemImage: "play.rectangle")
           }
 #endif
 
@@ -399,6 +528,8 @@ private struct SentMessagesView: View {
   @ObservedObject var store: SealedMessageStore
   @State private var showsPins = false
   @State private var copiedMessageID: UUID?
+  @State private var expiringMessageID: UUID?
+  @State private var actionErrorMessage: String?
 
   var body: some View {
     ZStack {
@@ -468,16 +599,35 @@ private struct SentMessagesView: View {
                 SentMessageRow(
                   message: message,
                   showsPin: showsPins,
-                  didCopy: copiedMessageID == message.id
-                ) {
-                  UIPasteboard.general.string = sealedMessageShareText(for: message.link)
-                  copiedMessageID = message.id
-                  softHaptic()
-                }
+                  didCopy: copiedMessageID == message.id,
+                  isExpiring: expiringMessageID == message.id,
+                  onCopy: {
+                    UIPasteboard.general.string = sealedMessageShareText(for: message.link)
+                    copiedMessageID = message.id
+                    softHaptic()
+                  },
+                  onExpire: {
+                    expireMessage(message)
+                  },
+                  onDelete: {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                      store.deleteSentMessage(id: message.id)
+                    }
+                    softHaptic()
+                  }
+                )
               }
             }
             .padding(.bottom, 20)
           }
+        }
+
+        if let actionErrorMessage {
+          StatusLine(
+            text: actionErrorMessage,
+            systemImage: "exclamationmark.triangle.fill",
+            tint: Color(red: 1.0, green: 0.68, blue: 0.38)
+          )
         }
       }
       .padding(.horizontal, 20)
@@ -487,13 +637,39 @@ private struct SentMessagesView: View {
       await store.refreshSentMessageStatuses()
     }
   }
+
+  private func expireMessage(_ message: SentMessageRecord) {
+    guard expiringMessageID == nil else {
+      return
+    }
+
+    expiringMessageID = message.id
+    actionErrorMessage = nil
+    Task {
+      do {
+        try await store.expireSentMessage(message)
+        softHaptic()
+      } catch {
+        actionErrorMessage = "Could not expire this link. Older sent messages may not support remote expiration."
+        warningHaptic()
+      }
+      expiringMessageID = nil
+    }
+  }
 }
 
 private struct SentMessageRow: View {
   let message: SentMessageRecord
   let showsPin: Bool
   let didCopy: Bool
+  let isExpiring: Bool
   let onCopy: () -> Void
+  let onExpire: () -> Void
+  let onDelete: () -> Void
+
+  private var isLinkAvailable: Bool {
+    message.status == .active
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -506,7 +682,7 @@ private struct SentMessageRow: View {
 
         Text(message.status.label)
           .font(.system(size: 12, weight: .semibold, design: .rounded))
-          .foregroundStyle(message.status == .active ? Color(red: 0.48, green: 1.0, blue: 0.70) : Color.white.opacity(0.58))
+          .foregroundStyle(message.status.tint)
           .padding(.horizontal, 9)
           .padding(.vertical, 5)
           .background(Color.white.opacity(0.07), in: Capsule())
@@ -517,16 +693,39 @@ private struct SentMessageRow: View {
         SentMessageMetric(title: "PIN", value: showsPin ? message.pin : "••••••")
       }
 
+      SentMessageDeliveryGrid(message: message)
+
       Text(message.link.absoluteString)
         .font(.system(size: 12, weight: .medium, design: .monospaced))
         .foregroundStyle(Color.white.opacity(0.54))
         .lineLimit(2)
         .truncationMode(.middle)
 
+      if isLinkAvailable {
+        HStack(spacing: 10) {
+          Button {
+            onCopy()
+          } label: {
+            Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(SecondaryActionButtonStyle())
+
+          Button {
+            onExpire()
+          } label: {
+            Label(isExpiring ? "Expiring..." : "Expire", systemImage: isExpiring ? "hourglass" : "timer")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(SecondaryActionButtonStyle())
+          .disabled(isExpiring)
+        }
+      }
+
       Button {
-        onCopy()
+        onDelete()
       } label: {
-        Label(didCopy ? "Copied" : "Copy share text", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+        Label(isLinkAvailable ? "Remove from list" : "Remove", systemImage: "trash")
           .frame(maxWidth: .infinity)
       }
       .buttonStyle(SecondaryActionButtonStyle())
@@ -534,6 +733,82 @@ private struct SentMessageRow: View {
     .padding(14)
     .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+  }
+}
+
+private struct SentMessageDeliveryGrid: View {
+  let message: SentMessageRecord
+
+  var body: some View {
+    LazyVGrid(
+      columns: [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8)
+      ],
+      alignment: .leading,
+      spacing: 8
+    ) {
+      SentMessageSignal(
+        title: "Text read",
+        systemImage: "text.alignleft",
+        isActive: message.textConsumed
+      )
+
+      SentMessageSignal(
+        title: message.hasImageAttachment ? "Image read" : "No image",
+        systemImage: message.hasImageAttachment ? "photo.fill" : "photo",
+        isActive: message.hasImageAttachment && message.imageConsumed,
+        isNeutral: !message.hasImageAttachment
+      )
+
+      SentMessageSignal(
+        title: "Fully read",
+        systemImage: "checkmark.seal.fill",
+        isActive: message.isFullyConsumed
+      )
+
+      SentMessageSignal(
+        title: "Screenshot",
+        systemImage: message.screenshotDetected ? "camera.viewfinder" : "camera",
+        isActive: message.screenshotDetected,
+        activeTint: Color(red: 1.0, green: 0.42, blue: 0.42)
+      )
+    }
+  }
+}
+
+private struct SentMessageSignal: View {
+  let title: String
+  let systemImage: String
+  let isActive: Bool
+  var isNeutral = false
+  var activeTint = Color(red: 0.48, green: 1.0, blue: 0.70)
+
+  private var tint: Color {
+    if isNeutral {
+      return Color.white.opacity(0.34)
+    }
+
+    return isActive ? activeTint : Color.white.opacity(0.34)
+  }
+
+  var body: some View {
+    Label {
+      Text(title)
+        .font(.system(size: 12, weight: .semibold, design: .rounded))
+        .lineLimit(1)
+        .minimumScaleFactor(0.82)
+    } icon: {
+      Image(systemName: systemImage)
+        .font(.system(size: 12, weight: .semibold))
+        .frame(width: 16)
+    }
+    .foregroundStyle(tint)
+    .padding(.horizontal, 9)
+    .padding(.vertical, 7)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(Color.white.opacity(isActive ? 0.085 : 0.045), in: RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(isActive ? 0.34 : 0.16), lineWidth: 1))
   }
 }
 
@@ -560,6 +835,7 @@ private struct ComposeSealedMessageView: View {
   let onCreatedLink: (URL) -> Void
   let onTestMessage: (CreatedSealedMessage, String, Data?) -> Void
   let completionActionTitle: String?
+  let usesProgressiveOnboarding: Bool
   let onCompletion: () -> Void
 
   @State private var message: String
@@ -575,6 +851,10 @@ private struct ComposeSealedMessageView: View {
   @State private var isCreating = false
   @State private var sealingText: String?
   @State private var sealingProgress = 0.0
+  @State private var hasEditedMessage = false
+  @State private var showsOnboardingImageStep = false
+  @State private var showsOnboardingPinStep = false
+  @State private var onboardingRevealTask: Task<Void, Never>?
 
   init(
     store: SealedMessageStore,
@@ -582,6 +862,7 @@ private struct ComposeSealedMessageView: View {
     initialMessage: String = defaultComposeMessage,
     initialPIN: String = "",
     completionActionTitle: String? = nil,
+    usesProgressiveOnboarding: Bool = false,
     onCreatedLink: @escaping (URL) -> Void,
     onTestMessage: @escaping (CreatedSealedMessage, String, Data?) -> Void,
     onCompletion: @escaping () -> Void = {}
@@ -591,6 +872,7 @@ private struct ComposeSealedMessageView: View {
     self.onCreatedLink = onCreatedLink
     self.onTestMessage = onTestMessage
     self.completionActionTitle = completionActionTitle
+    self.usesProgressiveOnboarding = usesProgressiveOnboarding
     self.onCompletion = onCompletion
     _message = State(initialValue: initialMessage)
     _pin = State(initialValue: initialPIN)
@@ -603,26 +885,45 @@ private struct ComposeSealedMessageView: View {
       && !isCreating
   }
 
+  private var shouldShowImageSection: Bool {
+    !usesProgressiveOnboarding || showsOnboardingImageStep
+  }
+
+  private var shouldShowPINSection: Bool {
+    !usesProgressiveOnboarding || showsOnboardingPinStep
+  }
+
+  private var shouldShowCreateButton: Bool {
+    !usesProgressiveOnboarding || showsOnboardingPinStep
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      if let sealingText {
+      if let createdMessage {
+        CreatedMessagePanel(
+          createdMessage: createdMessage,
+          completionActionTitle: completionActionTitle,
+          onCompletion: onCompletion,
+          onCreateNewMessage: resetCreatedMessage
+        ) {
+          onTestMessage(createdMessage, createdPlaintext ?? "", createdImageData)
+        }
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+      } else if let sealingText {
         SealingTransitionView(text: sealingText, progress: sealingProgress)
           .transition(.opacity.combined(with: .scale(scale: 0.98)))
-
-        if let createdMessage {
-          CreatedMessagePanel(
-            createdMessage: createdMessage,
-            completionActionTitle: completionActionTitle,
-            onCompletion: onCompletion
-          ) {
-            onTestMessage(createdMessage, createdPlaintext ?? "", createdImageData)
-          }
-          .transition(.opacity.combined(with: .move(edge: .bottom)))
-        }
       } else {
         VStack(alignment: .leading, spacing: 10) {
+          if usesProgressiveOnboarding {
+            ComposeStepTitle(number: 1, title: "Write your secret message")
+          }
+
           FieldHeader(title: "Message", isClearEnabled: !message.isEmpty) {
             message = ""
+            hasEditedMessage = false
+            showsOnboardingImageStep = false
+            showsOnboardingPinStep = false
+            onboardingRevealTask?.cancel()
             createdMessage = nil
             createdPlaintext = nil
             errorMessage = nil
@@ -639,67 +940,80 @@ private struct ComposeSealedMessageView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
         }
 
-        VStack(alignment: .leading, spacing: 10) {
-          FieldHeader(title: "Six-digit PIN", isClearEnabled: !pin.isEmpty) {
-            pin = ""
-            createdMessage = nil
-            createdPlaintext = nil
-            errorMessage = nil
-            softHaptic()
-          }
-
-          PinEntryField(pin: $pin, placeholder: "PIN", accessibilityLabel: "Create message PIN")
-        }
-
 #if !APPCLIP
-        if proImageAttachmentsEnabled {
-          ImageAttachmentPicker(
-            selectedImage: selectedImagePreview,
-            isPreparing: isPreparingImage,
-            onClear: {
-              selectedPhotoItem = nil
-              selectedImageData = nil
-              selectedImagePreview = nil
-              createdMessage = nil
-              createdPlaintext = nil
-              createdImageData = nil
-              errorMessage = nil
-              softHaptic()
-            },
-            selection: $selectedPhotoItem
-          )
+        if proImageAttachmentsEnabled, shouldShowImageSection {
+          VStack(alignment: .leading, spacing: 10) {
+            if usesProgressiveOnboarding {
+              ComposeStepTitle(number: 2, title: "Add an image", note: "Optional, free while in beta")
+            }
+
+            ImageAttachmentPicker(
+              selectedImage: selectedImagePreview,
+              isPreparing: isPreparingImage,
+              showsStandaloneBetaNote: !usesProgressiveOnboarding,
+              onClear: {
+                selectedPhotoItem = nil
+                selectedImageData = nil
+                selectedImagePreview = nil
+                createdMessage = nil
+                createdPlaintext = nil
+                createdImageData = nil
+                errorMessage = nil
+                softHaptic()
+              },
+              selection: $selectedPhotoItem
+            )
+          }
+          .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
 #endif
 
-        Button {
-          Task {
-            await createMessage()
+        if shouldShowPINSection {
+          VStack(alignment: .leading, spacing: 10) {
+            if usesProgressiveOnboarding {
+              ComposeStepTitle(number: 3, title: "Insert a PIN", note: "The receiver uses it to decrypt the message")
+            }
+
+            FieldHeader(title: "Six-digit PIN", isClearEnabled: !pin.isEmpty) {
+              pin = ""
+              createdMessage = nil
+              createdPlaintext = nil
+              errorMessage = nil
+              softHaptic()
+            }
+
+            PinEntryField(pin: $pin, placeholder: "PIN", accessibilityLabel: "Create message PIN")
           }
-        } label: {
-          Label(isCreating ? "Sealing..." : "Seal message", systemImage: isCreating ? "hourglass" : "lock.fill")
-            .frame(maxWidth: .infinity)
+          .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
-        .buttonStyle(PrimaryActionButtonStyle())
-        .disabled(!canCreate)
+
+        if shouldShowCreateButton {
+          Button {
+            Task {
+              await createMessage()
+            }
+          } label: {
+            Label(isCreating ? "Sealing..." : "Seal message", systemImage: isCreating ? "hourglass" : "lock.fill")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(PrimaryActionButtonStyle())
+          .disabled(!canCreate)
+          .transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
 
         if let errorMessage {
           StatusLine(text: errorMessage, systemImage: "exclamationmark.triangle.fill", tint: Color(red: 1.0, green: 0.68, blue: 0.38))
-        }
-
-        if let createdMessage {
-          CreatedMessagePanel(
-            createdMessage: createdMessage,
-            completionActionTitle: completionActionTitle,
-            onCompletion: onCompletion
-          ) {
-            onTestMessage(createdMessage, createdPlaintext ?? "", createdImageData)
-          }
         }
       }
     }
     .onChange(of: message) { _, newValue in
       if newValue.count > maxMessageCharacterCount {
         message = String(newValue.prefix(maxMessageCharacterCount))
+      }
+
+      if usesProgressiveOnboarding, !hasEditedMessage, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        hasEditedMessage = true
+        revealOnboardingImageAndPIN()
       }
     }
 #if !APPCLIP
@@ -709,6 +1023,9 @@ private struct ComposeSealedMessageView: View {
       }
     }
 #endif
+    .onDisappear {
+      onboardingRevealTask?.cancel()
+    }
   }
 
 #if !APPCLIP
@@ -819,18 +1136,61 @@ private struct ComposeSealedMessageView: View {
       }
     }
   }
+
+  private func resetCreatedMessage() {
+    withAnimation(.easeInOut(duration: 0.2)) {
+      message = ""
+      pin = ""
+      selectedPhotoItem = nil
+      selectedImageData = nil
+      selectedImagePreview = nil
+      createdMessage = nil
+      createdPlaintext = nil
+      createdImageData = nil
+      errorMessage = nil
+      sealingText = nil
+      sealingProgress = 0
+      hasEditedMessage = false
+      showsOnboardingImageStep = false
+      showsOnboardingPinStep = false
+      onboardingRevealTask?.cancel()
+    }
+  }
+
+  private func revealOnboardingImageAndPIN() {
+    onboardingRevealTask?.cancel()
+    onboardingRevealTask = Task {
+      await MainActor.run {
+        withAnimation(.easeOut(duration: 0.22)) {
+          showsOnboardingImageStep = true
+        }
+      }
+
+      try? await Task.sleep(nanoseconds: 600_000_000)
+      guard !Task.isCancelled else {
+        return
+      }
+
+      await MainActor.run {
+        withAnimation(.easeOut(duration: 0.22)) {
+          showsOnboardingPinStep = true
+        }
+      }
+    }
+  }
 }
 
 private struct ImageAttachmentPicker: View {
   let selectedImage: UIImage?
   let isPreparing: Bool
+  let showsStandaloneBetaNote: Bool
   let onClear: () -> Void
   @Binding var selection: PhotosPickerItem?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack {
-        Text("Pro image")
+        Text("Image")
           .formLabelStyle()
 
         Spacer()
@@ -882,12 +1242,35 @@ private struct ImageAttachmentPicker: View {
         .disabled(isPreparing)
       }
 
-      Text("*free while in beta")
-        .font(.system(size: 12, weight: .medium, design: .rounded))
-        .foregroundStyle(Color.white.opacity(0.42))
-        .padding(.leading, 2)
-        .accessibilityLabel("Free while in beta")
+      if showsStandaloneBetaNote {
+        Text("*free while in beta")
+          .font(.system(size: 12, weight: .medium, design: .rounded))
+          .foregroundStyle(Color.white.opacity(0.42))
+          .padding(.leading, 2)
+          .accessibilityLabel("Free while in beta")
+      }
     }
+  }
+}
+
+private struct ComposeStepTitle: View {
+  let number: Int
+  let title: String
+  var note: String?
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text("\(number). \(title)")
+        .font(.system(size: 16, weight: .semibold, design: .rounded))
+        .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+
+      if let note {
+        Text(note)
+          .font(.system(size: 12, weight: .medium, design: .rounded))
+          .foregroundStyle(Color.white.opacity(0.52))
+      }
+    }
+    .fixedSize(horizontal: false, vertical: true)
   }
 }
 
@@ -928,6 +1311,7 @@ private struct CreatedMessagePanel: View {
   let createdMessage: CreatedSealedMessage
   let completionActionTitle: String?
   let onCompletion: () -> Void
+  let onCreateNewMessage: () -> Void
   let onUseLink: () -> Void
 
   var body: some View {
@@ -980,6 +1364,26 @@ private struct CreatedMessagePanel: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(PrimaryActionButtonStyle())
+      }
+
+      if completionActionTitle == nil {
+        Button {
+          onCreateNewMessage()
+          softHaptic()
+        } label: {
+          Label("Create new message", systemImage: "plus.message.fill")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(PrimaryActionButtonStyle())
+      } else {
+        Button {
+          onCreateNewMessage()
+          softHaptic()
+        } label: {
+          Label("Create new message", systemImage: "plus.message.fill")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(SecondaryActionButtonStyle())
       }
     }
     .padding(14)
@@ -1207,10 +1611,7 @@ private struct SecureReaderSessionView: View {
         if showsImage, let attachment = openedMessage.attachment, let image = UIImage(data: attachment.data) {
           AttachmentImageReaderView(
             image: image,
-            onShowText: {
-              showsImage = false
-              softHaptic()
-            },
+            showsImage: $showsImage,
             onClose: close
           )
         } else {
@@ -1221,16 +1622,13 @@ private struct SecureReaderSessionView: View {
           )
 
           if openedMessage.attachment != nil {
-            Button {
-              showsImage = true
-              softHaptic()
-            } label: {
-              Label("Image", systemImage: "photo.fill")
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(PrimaryActionButtonStyle())
-            .padding(.horizontal, 20)
-            .padding(.bottom, 18)
+            ReaderModeSwitch(showsImage: $showsImage)
+              .frame(maxWidth: .infinity)
+              .padding(4)
+              .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+              .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
+              .padding(.horizontal, 20)
+              .padding(.bottom, 18)
           }
         }
       }
@@ -1241,7 +1639,7 @@ private struct SecureReaderSessionView: View {
   }
 
   private func handleScreenshotDetected() {
-    let eventPath = openedMessage.attachment?.eventPath
+    let eventPath = openedMessage.eventPath ?? openedMessage.attachment?.eventPath
     clear()
     dismiss()
     warningHaptic()
@@ -1259,7 +1657,7 @@ private struct SecureReaderSessionView: View {
   }
 
   private func clear() {
-    openedMessage = OpenedSealedMessage(plaintext: "", attachment: nil, retained: false)
+    openedMessage = OpenedSealedMessage(plaintext: "", attachment: nil, retained: false, eventPath: nil)
   }
 }
 
@@ -1284,10 +1682,7 @@ private struct SenderPreviewSessionView: View {
         if showsImage, let imageData, let image = UIImage(data: imageData) {
           AttachmentImageReaderView(
             image: image,
-            onShowText: {
-              showsImage = false
-              softHaptic()
-            },
+            showsImage: $showsImage,
             onClose: {
               dismiss()
               softHaptic()
@@ -1304,78 +1699,315 @@ private struct SenderPreviewSessionView: View {
           )
         }
 
-        VStack {
-          Spacer()
+        if !showsImage {
+          VStack {
+            Spacer()
 
-          if imageData != nil && !showsImage {
-            Button {
-              showsImage = true
-              softHaptic()
-            } label: {
-              Label("Image", systemImage: "photo.fill")
+            if imageData != nil {
+              ReaderModeSwitch(showsImage: $showsImage)
+                .frame(maxWidth: .infinity)
+                .padding(4)
+                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                .padding(.horizontal, 20)
+            }
+
+            ShareLink(
+              item: sealedMessageShareText(for: link),
+              subject: Text(sealedMessageShareSubject)
+            ) {
+              Label("Share", systemImage: "square.and.arrow.up")
                 .frame(maxWidth: .infinity)
             }
-            .buttonStyle(SecondaryActionButtonStyle())
+            .buttonStyle(PrimaryActionButtonStyle())
+            .padding(.top, imageData != nil ? 10 : 0)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 18)
           }
-
-          ShareLink(
-            item: sealedMessageShareText(for: link),
-            subject: Text(sealedMessageShareSubject)
-          ) {
-            Label("Share", systemImage: "square.and.arrow.up")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(PrimaryActionButtonStyle())
-          .padding(.top, imageData != nil && !showsImage ? 10 : 0)
-          .padding(.horizontal, 20)
-          .padding(.bottom, 18)
         }
       }
     }
   }
 }
 
-private struct AttachmentImageReaderView: View {
-  let image: UIImage
-  let onShowText: () -> Void
-  let onClose: () -> Void
+private struct ReaderModeSwitch: View {
+  @Binding var showsImage: Bool
 
   var body: some View {
-    ZStack(alignment: .bottom) {
-      Color(red: 0.045, green: 0.047, blue: 0.043)
-        .ignoresSafeArea()
-
-      Image(uiImage: image)
-        .resizable()
-        .scaledToFit()
-        .padding(.horizontal, 14)
-        .padding(.vertical, 92)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityLabel("Attached image")
-
-      HStack(spacing: 10) {
-        Button {
-          onClose()
-        } label: {
-          Image(systemName: "xmark")
-            .font(.system(size: 15, weight: .bold))
-            .frame(width: 44, height: 44)
-        }
-        .buttonStyle(SecondaryActionButtonStyle())
-        .accessibilityLabel("Close message")
-
-        Button {
-          onShowText()
-        } label: {
-          Label("Text", systemImage: "text.alignleft")
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(PrimaryActionButtonStyle())
-      }
-      .padding(.horizontal, 20)
-      .padding(.bottom, 18)
+    Picker("Reader mode", selection: $showsImage) {
+      Label("Text", systemImage: "text.alignleft")
+        .tag(false)
+      Label("Image", systemImage: "photo.fill")
+        .tag(true)
     }
-    .textSelection(.disabled)
+    .pickerStyle(.segmented)
+    .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
+    .onChange(of: showsImage) { _, _ in
+      softHaptic()
+    }
+  }
+}
+
+private struct AttachmentImageReaderView: View {
+  let image: UIImage
+  private let pixelatedImage: UIImage
+  @Binding var showsImage: Bool
+  let onClose: () -> Void
+
+  @StateObject private var proximitySensor = ProximitySensor()
+  @State private var showsTouchHint = false
+  @State private var hintDelayTask: Task<Void, Never>?
+  @State private var scale: CGFloat = 1
+  @State private var lastScale: CGFloat = 1
+  @State private var offset: CGSize = .zero
+  @State private var lastOffset: CGSize = .zero
+
+  private var revealActive: Bool {
+    proximitySensor.isRevealActive
+  }
+
+  init(image: UIImage, showsImage: Binding<Bool>, onClose: @escaping () -> Void) {
+    self.image = image
+    self.pixelatedImage = image.pixelatedForPrivacy()
+    _showsImage = showsImage
+    self.onClose = onClose
+  }
+
+  var body: some View {
+    GeometryReader { proxy in
+      let touchButtonTop: CGFloat = 8
+      let touchButtonSize = CGSize(width: max(proxy.size.width - 40, 180), height: 58)
+      let touchZone = CGRect(
+        x: (proxy.size.width - touchButtonSize.width) / 2,
+        y: touchButtonTop,
+        width: touchButtonSize.width,
+        height: touchButtonSize.height
+      )
+      let revealTop = touchZone.maxY + 12
+      let revealHeight = proxy.size.height * 0.22
+      let revealZone = CGRect(x: 0, y: revealTop, width: proxy.size.width, height: revealHeight)
+      let imageViewport = CGSize(
+        width: max(proxy.size.width - 28, 1),
+        height: max(proxy.size.height - proxy.safeAreaInsets.bottom - 176, 1)
+      )
+      let fittedImageSize = image.size.scaledToFit(in: imageViewport)
+
+      ZStack(alignment: .bottom) {
+        Color(red: 0.045, green: 0.047, blue: 0.043)
+          .ignoresSafeArea()
+
+        ZStack {
+          TransformableAttachmentImage(
+            image: pixelatedImage,
+            displaySize: fittedImageSize,
+            scale: scale,
+            offset: offset,
+            isPixelated: true
+          )
+          .accessibilityLabel("Pixelated attached image")
+
+          if revealActive {
+            TransformableAttachmentImage(
+              image: image,
+              displaySize: fittedImageSize,
+              scale: scale,
+              offset: offset,
+              isPixelated: false
+            )
+            .mask(
+              RevealWindowMask(revealZone: revealZone)
+            )
+            .accessibilityHidden(true)
+            .transition(.opacity)
+          }
+
+          if revealActive {
+            ActiveRevealWindowOverlay(revealZone: revealZone)
+              .allowsHitTesting(false)
+          }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .gesture(
+          DragGesture(minimumDistance: 0)
+            .onChanged { value in
+              let proposedOffset = CGSize(
+                width: lastOffset.width + value.translation.width,
+                height: lastOffset.height + value.translation.height
+              )
+              offset = clampedOffset(proposedOffset, displaySize: fittedImageSize, viewportSize: proxy.size, revealZone: revealZone, scale: scale)
+            }
+            .onEnded { _ in
+              offset = clampedOffset(offset, displaySize: fittedImageSize, viewportSize: proxy.size, revealZone: revealZone, scale: scale)
+              lastOffset = offset
+            }
+        )
+        .simultaneousGesture(
+          MagnificationGesture()
+            .onChanged { value in
+              scale = min(max(lastScale * value, 1), 5)
+              offset = clampedOffset(offset, displaySize: fittedImageSize, viewportSize: proxy.size, revealZone: revealZone, scale: scale)
+            }
+            .onEnded { _ in
+              scale = min(max(scale, 1), 5)
+              offset = clampedOffset(offset, displaySize: fittedImageSize, viewportSize: proxy.size, revealZone: revealZone, scale: scale)
+              lastScale = scale
+              lastOffset = offset
+            }
+        )
+        .onTapGesture(count: 2) {
+          withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            scale = 1
+            lastScale = 1
+            offset = .zero
+            lastOffset = .zero
+          }
+          softHaptic()
+        }
+        .privacySensitive()
+
+        RevealTouchTestButton(
+          isRevealActive: revealActive,
+          showsHint: showsTouchHint,
+          frame: touchZone
+        )
+
+        RevealTouchCaptureView { isActive in
+          proximitySensor.setScreenCoverActive(isActive)
+        }
+        .frame(width: touchZone.width, height: touchZone.height)
+        .position(x: touchZone.midX, y: touchZone.midY)
+        .accessibilityHidden(true)
+
+        HStack(spacing: 10) {
+          Button {
+            onClose()
+          } label: {
+            Image(systemName: "xmark")
+              .font(.system(size: 15, weight: .bold))
+              .frame(width: 44, height: 44)
+          }
+          .buttonStyle(SecondaryActionButtonStyle())
+          .accessibilityLabel("Close message")
+
+          ReaderModeSwitch(showsImage: $showsImage)
+            .frame(maxWidth: .infinity)
+            .padding(4)
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 18)
+      }
+      .textSelection(.disabled)
+      .onAppear {
+        UIApplication.shared.isIdleTimerDisabled = true
+        proximitySensor.start()
+        hintDelayTask?.cancel()
+        hintDelayTask = Task {
+          try? await Task.sleep(nanoseconds: 500_000_000)
+          guard !Task.isCancelled else {
+            return
+          }
+
+          await MainActor.run {
+            withAnimation(.easeOut(duration: 0.22)) {
+              showsTouchHint = true
+            }
+          }
+        }
+      }
+      .onDisappear {
+        UIApplication.shared.isIdleTimerDisabled = false
+        proximitySensor.stop()
+        hintDelayTask?.cancel()
+      }
+      .onChange(of: revealActive) { _, isActive in
+        if isActive {
+          softHaptic()
+        }
+      }
+    }
+  }
+
+  private func clampedOffset(_ proposedOffset: CGSize, displaySize: CGSize, viewportSize: CGSize, revealZone: CGRect, scale: CGFloat) -> CGSize {
+    let scaledSize = CGSize(width: displaySize.width * scale, height: displaySize.height * scale)
+    let viewportCenter = CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
+    let horizontalPadding: CGFloat = 44
+    let verticalPadding = max(72, revealZone.height * 0.34)
+    let minX = revealZone.midX - viewportCenter.x - scaledSize.width / 2 - horizontalPadding
+    let maxX = revealZone.midX - viewportCenter.x + scaledSize.width / 2 + horizontalPadding
+    let minY = revealZone.midY - viewportCenter.y - scaledSize.height / 2 - verticalPadding
+    let maxY = revealZone.midY - viewportCenter.y + scaledSize.height / 2 + verticalPadding
+
+    return CGSize(
+      width: min(max(proposedOffset.width, minX), maxX),
+      height: min(max(proposedOffset.height, minY), maxY)
+    )
+  }
+}
+
+private struct TransformableAttachmentImage: View {
+  let image: UIImage
+  let displaySize: CGSize
+  let scale: CGFloat
+  let offset: CGSize
+  let isPixelated: Bool
+
+  var body: some View {
+    Image(uiImage: image)
+      .resizable()
+      .interpolation(isPixelated ? .none : .high)
+      .scaledToFill()
+      .frame(width: displaySize.width, height: displaySize.height)
+      .scaleEffect(scale)
+      .offset(offset)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .clipped()
+  }
+}
+
+private struct RevealWindowMask: View {
+  let revealZone: CGRect
+
+  var body: some View {
+    GeometryReader { _ in
+      Color.black
+        .frame(width: revealZone.width, height: revealZone.height)
+        .position(x: revealZone.midX, y: revealZone.midY)
+    }
+  }
+}
+
+private struct ActiveRevealWindowOverlay: View {
+  let revealZone: CGRect
+
+  @State private var scanProgress: CGFloat = 0
+
+  var body: some View {
+    GeometryReader { _ in
+      ZStack {
+        RoundedRectangle(cornerRadius: 10)
+          .stroke(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.34), lineWidth: 1)
+          .frame(width: revealZone.width - 28, height: revealZone.height)
+          .position(x: revealZone.midX, y: revealZone.midY)
+
+        Capsule()
+          .fill(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.76))
+          .frame(width: revealZone.width - 54, height: 2)
+          .shadow(color: Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.54), radius: 10)
+          .position(
+            x: revealZone.midX,
+            y: revealZone.minY + 18 + (revealZone.height - 36) * scanProgress
+          )
+      }
+    }
+    .onAppear {
+      scanProgress = 0
+      withAnimation(.easeInOut(duration: 1.05).repeatForever(autoreverses: true)) {
+        scanProgress = 1
+      }
+    }
   }
 }
 
@@ -1391,6 +2023,7 @@ private struct OnboardingView: View {
   @State private var step: OnboardingStep = .reader
   @State private var didRevealMessage = false
   @State private var didScrollMessage = false
+  @State private var senderPreviewSession: SenderPreviewSession?
   @State private var showsReviewPrompt = false
 
   private var canAdvanceFromReader: Bool {
@@ -1449,10 +2082,17 @@ private struct OnboardingView: View {
             ComposeSealedMessageView(
               store: store,
               title: "Create",
-              initialMessage: onboardingComposeMessage,
+              initialMessage: "",
               completionActionTitle: "Complete onboarding",
+              usesProgressiveOnboarding: true,
               onCreatedLink: { _ in },
-              onTestMessage: { _, _, _ in },
+              onTestMessage: { message, plaintext, imageData in
+                senderPreviewSession = SenderPreviewSession(
+                  message: plaintext,
+                  imageData: imageData ?? demoCardImageData(),
+                  link: message.link
+                )
+              },
               onCompletion: {
                 showsReviewPrompt = true
               }
@@ -1464,6 +2104,9 @@ private struct OnboardingView: View {
       }
     }
     .textSelection(.disabled)
+    .fullScreenCover(item: $senderPreviewSession) { session in
+      SenderPreviewSessionView(message: session.message, imageData: session.imageData, link: session.link)
+    }
     .sheet(isPresented: $showsReviewPrompt) {
       OnboardingReviewPrompt(store: store) {
         showsReviewPrompt = false
@@ -1803,6 +2446,53 @@ private extension Text {
     font(.system(size: 12, weight: .semibold, design: .rounded))
       .textCase(.uppercase)
       .foregroundStyle(Color.white.opacity(0.50))
+  }
+}
+
+private extension CGSize {
+  func scaledToFit(in bounds: CGSize) -> CGSize {
+    guard width > 0, height > 0, bounds.width > 0, bounds.height > 0 else {
+      return .zero
+    }
+
+    let scale = min(bounds.width / width, bounds.height / height)
+    return CGSize(width: width * scale, height: height * scale)
+  }
+}
+
+private extension UIImage {
+  func pixelatedForPrivacy() -> UIImage {
+    guard size.width > 0, size.height > 0 else {
+      return self
+    }
+
+    let maxPixelDimension: CGFloat = 22
+    let aspectRatio = size.width / size.height
+    let pixelSize: CGSize
+
+    if aspectRatio >= 1 {
+      pixelSize = CGSize(
+        width: maxPixelDimension,
+        height: max(1, round(maxPixelDimension / aspectRatio))
+      )
+    } else {
+      pixelSize = CGSize(
+        width: max(1, round(maxPixelDimension * aspectRatio)),
+        height: maxPixelDimension
+      )
+    }
+
+    let rendererFormat = UIGraphicsImageRendererFormat()
+    rendererFormat.scale = 1
+    rendererFormat.opaque = true
+    let renderer = UIGraphicsImageRenderer(size: pixelSize, format: rendererFormat)
+
+    return renderer.image { context in
+      UIColor(red: 0.045, green: 0.047, blue: 0.043, alpha: 1).setFill()
+      context.fill(CGRect(origin: .zero, size: pixelSize))
+      context.cgContext.interpolationQuality = .low
+      draw(in: CGRect(origin: .zero, size: pixelSize))
+    }
   }
 }
 

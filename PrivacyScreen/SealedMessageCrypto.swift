@@ -19,6 +19,7 @@ struct SealedMessageUpload: Equatable {
   let tag: Data
   let salt: Data
   let pinProof: Data
+  let revokeProof: Data
   let linkSecret: Data
   let normalizedPIN: String
 }
@@ -47,6 +48,7 @@ struct OpenedSealedMessage: Equatable {
   let plaintext: String
   let attachment: OpenedSealedAttachment?
   let retained: Bool
+  let eventPath: String?
 }
 
 struct SealedMessageLink: Equatable {
@@ -144,6 +146,7 @@ enum SealedMessageCrypto {
       tag: sealedBox.tag,
       salt: salt,
       pinProof: makePINVerifier(linkSecret: linkSecret, pin: normalizedPIN),
+      revokeProof: makeRevokeProof(linkSecret: linkSecret),
       linkSecret: linkSecret,
       normalizedPIN: normalizedPIN
     )
@@ -226,6 +229,10 @@ enum SealedMessageCrypto {
     }
 
     return makePINVerifier(linkSecret: request.linkSecret, pin: normalizedPIN)
+  }
+
+  static func revokeProof(request: MessageOpenRequest) -> Data {
+    makeRevokeProof(linkSecret: request.linkSecret)
   }
 
   static func open(_ envelope: SealedMessageEnvelope, request: MessageOpenRequest, pin: String) throws -> String {
@@ -318,6 +325,21 @@ enum SealedMessageCrypto {
     let mac = HMAC<SHA256>.authenticationCode(
       for: Data("cryptoscreen pin proof".utf8),
       using: verifierKey
+    )
+
+    return Data(mac)
+  }
+
+  private static func makeRevokeProof(linkSecret: Data) -> Data {
+    let revokeKey = HKDF<SHA256>.deriveKey(
+      inputKeyMaterial: SymmetricKey(data: linkSecret),
+      salt: Data("cryptoscreen revoke proof salt v1".utf8),
+      info: Data("cryptoscreen revoke verifier v1".utf8),
+      outputByteCount: 32
+    )
+    let mac = HMAC<SHA256>.authenticationCode(
+      for: Data("cryptoscreen revoke proof".utf8),
+      using: revokeKey
     )
 
     return Data(mac)

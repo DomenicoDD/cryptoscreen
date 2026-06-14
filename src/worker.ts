@@ -18,6 +18,7 @@ const ALPHA_LYRAE_FONT_URL = "/assets/AlphaLyrae-Medium.woff2";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+={0,2}$/;
 const consumeStatuses = ["opened", "wrong_pin", "destroyed", "expired", "unavailable"] as const;
+const messageStatuses = ["active", "expired", "consumed", "destroyed"] as const;
 const attachmentContentTypes = ["image/jpeg", "image/png", "image/heic", "image/heif"] as const;
 const readSessionEventTypes = ["screenshot"] as const;
 const encoder = new TextEncoder();
@@ -38,11 +39,16 @@ type CreateMessageBody = {
   tag: string;
   salt: string;
   pinProof: string;
+  revokeProof?: string;
   ttlSeconds?: number;
 };
 
 type ConsumeMessageBody = {
   pinProof: string;
+};
+
+type ExpireMessageBody = {
+  revokeProof: string;
 };
 
 type FeedbackBody = {
@@ -83,7 +89,11 @@ type ConsumeMessageRow = {
 };
 
 type MessageStatusRow = {
-  status: "active" | "expired" | "consumed";
+  status: (typeof messageStatuses)[number];
+  textConsumed: boolean;
+  imageAttachmentAttached: boolean;
+  imageAttachmentConsumed: boolean;
+  screenshotDetected: boolean;
 };
 
 type AttachmentContentType = (typeof attachmentContentTypes)[number];
@@ -99,6 +109,7 @@ type MessageAttachmentStateRow = {
 };
 
 type ReadSessionRow = {
+  message_id: string;
   object_key: string;
   content_type: AttachmentContentType;
   ciphertext_bytes: number;
@@ -158,6 +169,16 @@ export default {
       const statusMatch = /^\/api\/messages\/([^/]+)\/status$/.exec(url.pathname);
       if (statusMatch && request.method === "GET") {
         return await messageStatus(env, statusMatch[1]);
+      }
+
+      const expireMatch = /^\/api\/messages\/([^/]+)\/expire$/.exec(url.pathname);
+      if (expireMatch && request.method === "POST") {
+        return await expireMessage(request, env, expireMatch[1]);
+      }
+
+      const messageEventMatch = /^\/api\/messages\/([^/]+)\/events$/.exec(url.pathname);
+      if (messageEventMatch && request.method === "POST") {
+        return await recordMessageEvent(request, env, messageEventMatch[1]);
       }
 
       const consumeMatch = /^\/api\/messages\/([^/]+)\/consume$/.exec(url.pathname);
@@ -281,6 +302,9 @@ async function createMessage(request: Request, env: Env): Promise<Response> {
   const ttlSeconds = clampTTL(body.ttlSeconds);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
   const pinVerifierHex = bytesToHex(await pepperPinProof(base64UrlToBytes(body.pinProof, "pinProof", 32, 32), env));
+  const revokeVerifierHex = body.revokeProof === undefined
+    ? null
+    : bytesToHex(await pepperPinProof(base64UrlToBytes(body.revokeProof, "revokeProof", 32, 32), env));
 
   const sql = neon(env.DATABASE_URL);
   const rows = await sql`
@@ -291,6 +315,7 @@ async function createMessage(request: Request, env: Env): Promise<Response> {
       tag,
       salt,
       pin_verifier,
+      revoke_verifier,
       max_attempts,
       expires_at
     )
@@ -301,6 +326,7 @@ async function createMessage(request: Request, env: Env): Promise<Response> {
       decode(${base64UrlToHex(body.tag, "tag", 16, 16)}, 'hex'),
       decode(${base64UrlToHex(body.salt, "salt", 16, 16)}, 'hex'),
       decode(${pinVerifierHex}, 'hex'),
+      decode(${revokeVerifierHex}, 'hex'),
       ${3},
       ${expiresAt.toISOString()}::timestamptz
     )
@@ -308,6 +334,12 @@ async function createMessage(request: Request, env: Env): Promise<Response> {
   `;
 
   const row = parseCreateRow(rows[0]);
+
+  await sql`
+    insert into cryptoscreen.sealed_message_delivery_audit (message_id, created_at, updated_at)
+    values (${row.id}::uuid, now(), now())
+    on conflict (message_id) do nothing
+  `;
 
   return jsonResponse(
     {
@@ -405,6 +437,14 @@ async function uploadMessageAttachment(request: Request, env: Env, messageID: st
     `;
     const row = parseAttachmentMetadataRow(rows[0]);
 
+    await sql`
+      update cryptoscreen.sealed_message_delivery_audit
+      set
+        has_image_attachment = true,
+        updated_at = now()
+      where message_id = ${messageID}::uuid
+    `;
+
     return jsonResponse(
       {
         id: row.id,
@@ -435,6 +475,8 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
   const row = await consumeMessageRow(env, messageID, pinVerifierHex);
 
   if (row.status !== "opened") {
+    await updateAuditForConsumeResult(env, messageID, row);
+
     return jsonResponse({
       status: row.status,
       remainingAttempts: row.remaining_attempts ?? 0,
@@ -449,6 +491,7 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
   const attachment = row.retained
     ? null
     : await createReadSessionForAttachment(env, messageID, row);
+  await updateAuditForConsumeResult(env, messageID, row);
 
   return jsonResponse({
     status: row.status,
@@ -458,8 +501,46 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
     nonce: base64ToBase64Url(row.nonce),
     tag: base64ToBase64Url(row.tag),
     salt: base64ToBase64Url(row.salt),
+    eventPath: `/api/messages/${messageID}/events`,
     attachment
   });
+}
+
+async function updateAuditForConsumeResult(env: Env, messageID: string, row: ConsumeMessageRow): Promise<void> {
+  const sql = neon(env.DATABASE_URL);
+
+  if (row.status === "opened") {
+    await sql`
+      update cryptoscreen.sealed_message_delivery_audit
+      set
+        text_consumed_at = coalesce(text_consumed_at, now()),
+        has_image_attachment = has_image_attachment or ${row.attachment_id !== null},
+        updated_at = now()
+      where message_id = ${messageID}::uuid
+    `;
+    return;
+  }
+
+  if (row.status === "expired") {
+    await sql`
+      update cryptoscreen.sealed_message_delivery_audit
+      set
+        expired_at = coalesce(expired_at, now()),
+        updated_at = now()
+      where message_id = ${messageID}::uuid
+    `;
+    return;
+  }
+
+  if (row.status === "destroyed") {
+    await sql`
+      update cryptoscreen.sealed_message_delivery_audit
+      set
+        destroyed_at = coalesce(destroyed_at, now()),
+        updated_at = now()
+      where message_id = ${messageID}::uuid
+    `;
+  }
 }
 
 async function consumeMessageRow(
@@ -612,6 +693,7 @@ async function downloadReadSessionAttachment(env: Env, readSessionID: string): P
       and consumed_at is null
       and expires_at > now()
     returning
+      message_id::text,
       object_key,
       content_type,
       ciphertext_bytes
@@ -629,6 +711,14 @@ async function downloadReadSessionAttachment(env: Env, readSessionID: string): P
 
   const body = await object.arrayBuffer();
   await bucket.delete(row.object_key);
+  await sql`
+    update cryptoscreen.sealed_message_delivery_audit
+    set
+      has_image_attachment = true,
+      image_consumed_at = coalesce(image_consumed_at, now()),
+      updated_at = now()
+    where message_id = ${row.message_id}::uuid
+  `;
 
   return new Response(body, {
     status: 200,
@@ -651,22 +741,35 @@ async function recordReadSessionEvent(request: Request, env: Env, readSessionID:
   const body = parseReadSessionEventBody(await readJson(request));
   const sql = neon(env.DATABASE_URL);
   const rows = await sql`
-    insert into cryptoscreen.sealed_message_read_session_events (
+    with target_session as (
+      select id, message_id
+      from cryptoscreen.sealed_message_read_sessions
+      where id = ${readSessionID}::uuid
+        and expires_at > now()
+      limit 1
+    ),
+    inserted_event as (
+      insert into cryptoscreen.sealed_message_read_session_events (
       read_session_id,
       event_type,
       occurred_at
     )
     select
-      ${readSessionID}::uuid,
+      id,
       ${body.type},
       ${body.timestamp}::timestamptz
-    where exists (
-      select 1
-      from cryptoscreen.sealed_message_read_sessions
-      where id = ${readSessionID}::uuid
-        and expires_at > now()
+      from target_session
+      returning id
+    ),
+    updated_audit as (
+      update cryptoscreen.sealed_message_delivery_audit
+      set
+        screenshot_detected_at = coalesce(screenshot_detected_at, ${body.timestamp}::timestamptz, now()),
+        updated_at = now()
+      where message_id in (select message_id from target_session)
+      returning message_id
     )
-    returning id
+    select id from inserted_event
   `;
 
   if (rows.length === 0) {
@@ -678,6 +781,110 @@ async function recordReadSessionEvent(request: Request, env: Env, readSessionID:
   });
 }
 
+async function recordMessageEvent(request: Request, env: Env, messageID: string): Promise<Response> {
+  if (!UUID_RE.test(messageID)) {
+    throw new HttpError(400, "invalid_message_id", "Message id must be a UUID.");
+  }
+
+  const body = parseReadSessionEventBody(await readJson(request));
+  const sql = neon(env.DATABASE_URL);
+  const rows = await sql`
+    update cryptoscreen.sealed_message_delivery_audit
+    set
+      screenshot_detected_at = coalesce(screenshot_detected_at, ${body.timestamp}::timestamptz, now()),
+      updated_at = now()
+    where message_id = ${messageID}::uuid
+      and text_consumed_at is not null
+    returning message_id
+  `;
+
+  if (rows.length === 0) {
+    throw new HttpError(410, "message_event_unavailable", "This message read session is no longer available.");
+  }
+
+  return jsonResponse({ ok: true }, 202, {
+    "Cache-Control": "no-store"
+  });
+}
+
+async function expireMessage(request: Request, env: Env, messageID: string): Promise<Response> {
+  if (!UUID_RE.test(messageID)) {
+    throw new HttpError(400, "invalid_message_id", "Message id must be a UUID.");
+  }
+
+  const body = parseExpireBody(await readJson(request));
+  const revokeVerifierHex = bytesToHex(await pepperPinProof(base64UrlToBytes(body.revokeProof, "revokeProof", 32, 32), env));
+  const sql = neon(env.DATABASE_URL);
+  const stateRows = await sql`
+    select
+      retained,
+      expires_at <= now() as is_expired,
+      revoke_verifier is null as missing_revoke_verifier,
+      revoke_verifier = decode(${revokeVerifierHex}, 'hex') as proof_matches
+    from cryptoscreen.sealed_messages
+    where id = ${messageID}::uuid
+    limit 1
+  `;
+
+  if (stateRows.length === 0) {
+    return await messageStatus(env, messageID);
+  }
+
+  const state = expectDatabaseRecord(stateRows[0]);
+  const retained = expectDatabaseBoolean(state.retained, "retained");
+  const isExpired = expectDatabaseBoolean(state.is_expired, "is_expired");
+  const missingRevokeVerifier = expectDatabaseBoolean(state.missing_revoke_verifier, "missing_revoke_verifier");
+  const proofMatches = expectDatabaseBoolean(state.proof_matches, "proof_matches");
+
+  if (retained) {
+    throw new HttpError(409, "retained_message_not_revocable", "Service-owned retained messages cannot be expired this way.");
+  }
+
+  if (isExpired) {
+    return await messageStatus(env, messageID);
+  }
+
+  if (missingRevokeVerifier) {
+    throw new HttpError(409, "message_not_revocable", "This message was created before link expiration was supported.");
+  }
+
+  if (!proofMatches) {
+    throw new HttpError(403, "invalid_revoke_proof", "This sender cannot expire the message.");
+  }
+
+  const objectRows = await sql`
+    select object_key
+    from cryptoscreen.sealed_message_attachments
+    where message_id = ${messageID}::uuid
+  `;
+  const bucket = (env as Env & { ATTACHMENTS?: R2Bucket }).ATTACHMENTS;
+  if (bucket) {
+    await Promise.all(
+      objectRows
+        .map((row) => expectDatabaseString(expectDatabaseRecord(row).object_key, "object_key"))
+        .map((objectKey) => bucket.delete(objectKey))
+    );
+  }
+
+  await sql`
+    insert into cryptoscreen.sealed_message_delivery_audit (message_id, expired_at, created_at, updated_at)
+    values (${messageID}::uuid, now(), now(), now())
+    on conflict (message_id) do update
+    set
+      expired_at = coalesce(cryptoscreen.sealed_message_delivery_audit.expired_at, now()),
+      updated_at = now()
+  `;
+
+  await sql`
+    delete from cryptoscreen.sealed_messages
+    where id = ${messageID}::uuid
+      and not retained
+      and revoke_verifier = decode(${revokeVerifierHex}, 'hex')
+  `;
+
+  return await messageStatus(env, messageID);
+}
+
 async function messageStatus(env: Env, messageID: string): Promise<Response> {
   if (!UUID_RE.test(messageID)) {
     throw new HttpError(400, "invalid_message_id", "Message id must be a UUID.");
@@ -685,7 +892,22 @@ async function messageStatus(env: Env, messageID: string): Promise<Response> {
 
   const sql = neon(env.DATABASE_URL);
   const rows = await sql`
-    with deleted_expired as (
+    with expiring_message as (
+      select id
+      from cryptoscreen.sealed_messages
+      where id = ${messageID}::uuid
+        and not retained
+        and expires_at <= now()
+    ),
+    marked_expired as (
+      update cryptoscreen.sealed_message_delivery_audit
+      set
+        expired_at = coalesce(expired_at, now()),
+        updated_at = now()
+      where message_id in (select id from expiring_message)
+      returning message_id
+    ),
+    deleted_expired as (
       delete from cryptoscreen.sealed_messages
       where id = ${messageID}::uuid
         and not retained
@@ -701,9 +923,17 @@ async function messageStatus(env: Env, messageID: string): Promise<Response> {
     select
       case
         when exists (select 1 from active_message) then 'active'
-        when exists (select 1 from deleted_expired) then 'expired'
+        when audit.destroyed_at is not null then 'destroyed'
+        when audit.expired_at is not null or exists (select 1 from deleted_expired) then 'expired'
         else 'consumed'
-      end as status
+      end as status,
+      coalesce(audit.text_consumed_at is not null, false) as text_consumed,
+      coalesce(audit.has_image_attachment, false) as image_attachment_attached,
+      coalesce(audit.image_consumed_at is not null, false) as image_attachment_consumed,
+      coalesce(audit.screenshot_detected_at is not null, false) as screenshot_detected
+    from (select 1) singleton
+    left join cryptoscreen.sealed_message_delivery_audit audit
+      on audit.message_id = ${messageID}::uuid
   `;
 
   return jsonResponse(parseMessageStatusRow(rows[0]), 200, {
@@ -769,6 +999,7 @@ function parseCreateBody(value: unknown): CreateMessageBody {
     tag: expectString(body.tag, "tag"),
     salt: expectString(body.salt, "salt"),
     pinProof: expectString(body.pinProof, "pinProof"),
+    revokeProof: body.revokeProof === undefined ? undefined : expectString(body.revokeProof, "revokeProof"),
     ttlSeconds
   };
 }
@@ -778,6 +1009,14 @@ function parseConsumeBody(value: unknown): ConsumeMessageBody {
 
   return {
     pinProof: expectString(body.pinProof, "pinProof")
+  };
+}
+
+function parseExpireBody(value: unknown): ExpireMessageBody {
+  const body = expectRecord(value);
+
+  return {
+    revokeProof: expectString(body.revokeProof, "revokeProof")
   };
 }
 
@@ -1135,6 +1374,7 @@ function parseReadSessionRow(value: unknown): ReadSessionRow {
   }
 
   return {
+    message_id: expectDatabaseString(row.message_id, "message_id"),
     object_key: expectDatabaseString(row.object_key, "object_key"),
     content_type: contentType,
     ciphertext_bytes: expectDatabaseNumber(row.ciphertext_bytes, "ciphertext_bytes")
@@ -1145,11 +1385,17 @@ function parseMessageStatusRow(value: unknown): MessageStatusRow {
   const row = expectDatabaseRecord(value);
   const status = expectDatabaseString(row.status, "status");
 
-  if (status !== "active" && status !== "expired" && status !== "consumed") {
+  if (!messageStatuses.includes(status as MessageStatusRow["status"])) {
     throw new HttpError(500, "invalid_database_result", "Message status returned an invalid value.");
   }
 
-  return { status };
+  return {
+    status: status as MessageStatusRow["status"],
+    textConsumed: expectDatabaseBoolean(row.text_consumed, "text_consumed"),
+    imageAttachmentAttached: expectDatabaseBoolean(row.image_attachment_attached, "image_attachment_attached"),
+    imageAttachmentConsumed: expectDatabaseBoolean(row.image_attachment_consumed, "image_attachment_consumed"),
+    screenshotDetected: expectDatabaseBoolean(row.screenshot_detected, "screenshot_detected")
+  };
 }
 
 function parseMessageStatsRow(value: unknown): MessageStats {
@@ -1213,6 +1459,14 @@ function expectNullableDatabaseNumber(value: unknown, field: string): number | n
   }
 
   return expectDatabaseNumber(value, field);
+}
+
+function expectDatabaseBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new HttpError(500, "invalid_database_result", `The database field ${field} was invalid.`);
+  }
+
+  return value;
 }
 
 function expectNullableDatabaseBoolean(value: unknown, field: string): boolean | null {
