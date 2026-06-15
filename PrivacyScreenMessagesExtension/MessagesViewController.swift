@@ -11,14 +11,26 @@ final class MessagesViewController: MSMessagesAppViewController {
     installComposeView()
   }
 
+  override func willBecomeActive(with conversation: MSConversation) {
+    composeContext.activeConversation = conversation
+    composeContext.select(message: conversation.selectedMessage)
+  }
+
   override func didBecomeActive(with conversation: MSConversation) {
     composeContext.activeConversation = conversation
+    composeContext.select(message: conversation.selectedMessage)
   }
 
   override func willResignActive(with conversation: MSConversation) {
     if composeContext.activeConversation === conversation {
       composeContext.activeConversation = nil
     }
+  }
+
+  override func didSelect(_ message: MSMessage, conversation: MSConversation) {
+    composeContext.activeConversation = conversation
+    composeContext.select(message: message)
+    requestPresentationStyle(.expanded)
   }
 
   private func installComposeView() {
@@ -41,11 +53,39 @@ final class MessagesViewController: MSMessagesAppViewController {
 @MainActor
 final class MessagesComposeContext: ObservableObject {
   @Published private(set) var canInsertMessages = false
+  @Published private(set) var selectedMessageLink: URL?
   weak var messagesViewController: MSMessagesAppViewController?
 
   weak var activeConversation: MSConversation? {
     didSet {
       canInsertMessages = activeConversation != nil
+    }
+  }
+
+  func select(message: MSMessage?) {
+    guard let url = message?.url, SealedMessageCrypto.request(from: url) != nil else {
+      selectedMessageLink = nil
+      return
+    }
+
+    selectedMessageLink = url
+  }
+
+  func createNewMessage() {
+    selectedMessageLink = nil
+  }
+
+  func openInCryptoscreen(_ url: URL) async -> Bool {
+    await withCheckedContinuation { continuation in
+      messagesViewController?.extensionContext?.open(url) { [weak self] success in
+        if success {
+          Task { @MainActor in
+            self?.messagesViewController?.dismiss()
+          }
+        }
+
+        continuation.resume(returning: success)
+      }
     }
   }
 

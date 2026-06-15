@@ -466,11 +466,14 @@ struct SealedMessageRootView: View {
         .presentationDetents([.medium])
     }
 #if !APPCLIP
-    .fullScreenCover(isPresented: $isShowingOnboarding) {
+    .sheet(isPresented: $isShowingOnboarding) {
       OnboardingView(store: store) {
         hasCompletedOnboarding = true
         isShowingOnboarding = false
       }
+      .presentationDetents([.large])
+      .presentationDragIndicator(.visible)
+      .presentationBackground(Color(red: 0.045, green: 0.047, blue: 0.043))
     }
     .onAppear {
       if !hasCompletedOnboarding {
@@ -1942,6 +1945,12 @@ private struct AttachmentImageReaderView: View {
         width: touchButtonSize.width,
         height: touchButtonSize.height
       )
+      let touchCaptureZone = CGRect(
+        x: 0,
+        y: touchZone.minY - 15,
+        width: proxy.size.width,
+        height: touchZone.height + 30
+      )
       let revealTop = touchZone.maxY + 12
       let revealHeight = proxy.size.height * 0.22
       let revealZone = CGRect(x: 0, y: revealTop, width: proxy.size.width, height: revealHeight)
@@ -2036,8 +2045,8 @@ private struct AttachmentImageReaderView: View {
         RevealTouchCaptureView { isActive in
           proximitySensor.setScreenCoverActive(isActive)
         }
-        .frame(width: touchZone.width, height: touchZone.height)
-        .position(x: touchZone.midX, y: touchZone.midY)
+        .frame(width: touchCaptureZone.width, height: touchCaptureZone.height)
+        .position(x: touchCaptureZone.midX, y: touchCaptureZone.midY)
         .accessibilityHidden(true)
 
         if onClose != nil || showsModeSwitch {
@@ -2750,13 +2759,105 @@ private extension UIImage {
     rendererFormat.scale = 1
     rendererFormat.opaque = true
     let renderer = UIGraphicsImageRenderer(size: pixelSize, format: rendererFormat)
-
-    return renderer.image { context in
+    let sampledImage = renderer.image { context in
       UIColor(red: 0.045, green: 0.047, blue: 0.043, alpha: 1).setFill()
       context.fill(CGRect(origin: .zero, size: pixelSize))
       context.cgContext.interpolationQuality = .low
       draw(in: CGRect(origin: .zero, size: pixelSize))
     }
+
+    return sampledImage.shuffledPixels(seed: privacyPixelShuffleSeed(pixelSize: pixelSize)) ?? sampledImage
+  }
+
+  private func privacyPixelShuffleSeed(pixelSize: CGSize) -> UInt64 {
+    var seed = UInt64(max(1, Int(pixelSize.width))) << 32
+    seed ^= UInt64(max(1, Int(pixelSize.height))) << 16
+    seed ^= UInt64(max(1, Int(size.width.rounded()))) &* 1_099_511_628_211
+    seed ^= UInt64(max(1, Int(size.height.rounded()))) &* 14_695_981_039_346_656_037
+    return seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
+  }
+
+  private func shuffledPixels(seed: UInt64) -> UIImage? {
+    guard let cgImage else {
+      return nil
+    }
+
+    let width = cgImage.width
+    let height = cgImage.height
+    guard width > 0, height > 0 else {
+      return nil
+    }
+
+    let bytesPerPixel = 4
+    let bytesPerRow = width * bytesPerPixel
+    var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    guard let inputContext = CGContext(
+      data: &pixels,
+      width: width,
+      height: height,
+      bitsPerComponent: 8,
+      bytesPerRow: bytesPerRow,
+      space: colorSpace,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+    ) else {
+      return nil
+    }
+
+    inputContext.interpolationQuality = .none
+    inputContext.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+    var shuffledPixels = pixels
+    let pixelCount = width * height
+    var generator = PrivacyPixelShuffleGenerator(seed: seed)
+    guard pixelCount > 1 else {
+      return self
+    }
+
+    for index in stride(from: pixelCount - 1, through: 1, by: -1) {
+      let swapIndex = Int(generator.next() % UInt64(index + 1))
+      guard swapIndex != index else {
+        continue
+      }
+
+      let sourceOffset = index * bytesPerPixel
+      let swapOffset = swapIndex * bytesPerPixel
+
+      for component in 0..<bytesPerPixel {
+        shuffledPixels.swapAt(sourceOffset + component, swapOffset + component)
+      }
+    }
+
+    guard let outputContext = CGContext(
+      data: &shuffledPixels,
+      width: width,
+      height: height,
+      bitsPerComponent: 8,
+      bytesPerRow: bytesPerRow,
+      space: colorSpace,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+    ),
+    let outputImage = outputContext.makeImage() else {
+      return nil
+    }
+
+    return UIImage(cgImage: outputImage, scale: scale, orientation: imageOrientation)
+  }
+}
+
+private struct PrivacyPixelShuffleGenerator {
+  private var state: UInt64
+
+  init(seed: UInt64) {
+    state = seed == 0 ? 0x9E37_79B9_7F4A_7C15 : seed
+  }
+
+  mutating func next() -> UInt64 {
+    state &+= 0x9E37_79B9_7F4A_7C15
+    var value = state
+    value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
+    value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
+    return value ^ (value >> 31)
   }
 }
 

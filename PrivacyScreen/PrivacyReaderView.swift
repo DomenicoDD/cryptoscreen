@@ -60,6 +60,12 @@ struct PrivacyReaderView: View {
         width: touchButtonSize.width,
         height: touchButtonSize.height
       )
+      let touchCaptureZone = CGRect(
+        x: 0,
+        y: touchZone.minY - 15,
+        width: proxy.size.width,
+        height: touchZone.height + 30
+      )
       let revealTop = touchZone.maxY + 12
       let revealHeight = proxy.size.height * 0.22
       let revealZone = CGRect(x: 0, y: revealTop, width: proxy.size.width, height: revealHeight)
@@ -113,8 +119,8 @@ struct PrivacyReaderView: View {
         RevealTouchCaptureView { isActive in
           proximitySensor.setScreenCoverActive(isActive)
         }
-        .frame(width: touchZone.width, height: touchZone.height)
-        .position(x: touchZone.midX, y: touchZone.midY)
+        .frame(width: touchCaptureZone.width, height: touchCaptureZone.height)
+        .position(x: touchCaptureZone.midX, y: touchCaptureZone.midY)
         .accessibilityHidden(true)
 
         if didReveal && !didScroll {
@@ -505,21 +511,8 @@ struct RevealTouchTestButton: View {
   let showsHint: Bool
   let frame: CGRect
 
-  @State private var activePulse = false
-
   var body: some View {
     ZStack {
-      RoundedRectangle(cornerRadius: 8)
-        .fill(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(isRevealActive ? (activePulse ? 0.18 : 0.10) : 0))
-
-      if isRevealActive {
-        Capsule()
-          .fill(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.72))
-          .frame(width: max(54, frame.width * 0.22), height: 2)
-          .offset(x: activePulse ? frame.width * 0.34 : -frame.width * 0.34)
-          .shadow(color: Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.46), radius: 8)
-      }
-
       HStack(spacing: 0) {
         if showsHint {
           Text("Cover this part with your hand")
@@ -530,40 +523,20 @@ struct RevealTouchTestButton: View {
       }
     }
     .frame(width: frame.width, height: frame.height)
-    .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(isRevealActive ? 1 : 0.82))
+    .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.82))
     .overlay(
       RoundedRectangle(cornerRadius: 8)
         .stroke(
-          Color(red: 0.48, green: 1.0, blue: 0.70).opacity(isRevealActive ? 0.88 : 0.56),
+          Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.56),
           style: StrokeStyle(lineWidth: 1.3, dash: [5, 5])
         )
     )
     .contentShape(RoundedRectangle(cornerRadius: 8))
-    .opacity(showsHint || isRevealActive ? 1 : 0.01)
+    .opacity(isRevealActive ? 0 : (showsHint ? 1 : 0.01))
     .position(x: frame.midX, y: frame.midY)
-    .animation(.easeInOut(duration: 0.18), value: isRevealActive)
+    .animation(.easeInOut(duration: 0.20), value: isRevealActive)
     .animation(.easeOut(duration: 0.22), value: showsHint)
-    .onAppear {
-      updateActiveAnimation()
-    }
-    .onChange(of: isRevealActive) { _, _ in
-      updateActiveAnimation()
-    }
     .accessibilityLabel("Reveal test area")
-  }
-
-  private func updateActiveAnimation() {
-    guard isRevealActive else {
-      withAnimation(.easeOut(duration: 0.16)) {
-        activePulse = false
-      }
-      return
-    }
-
-    activePulse = false
-    withAnimation(.easeInOut(duration: 0.86).repeatForever(autoreverses: true)) {
-      activePulse = true
-    }
   }
 }
 

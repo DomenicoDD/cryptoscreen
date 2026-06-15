@@ -32,19 +32,38 @@ struct MessagesComposeView: View {
 
   var body: some View {
     NavigationStack {
-      ScrollView {
-        VStack(alignment: .leading, spacing: 14) {
-          messageSection
-          imageSection
-          pinSection
-          sharePINSection
-          actionSection
+      Group {
+        if let selectedMessageLink = context.selectedMessageLink {
+          MessagesOpenSelectedView(context: context, link: selectedMessageLink)
+            .id(selectedMessageLink.absoluteString)
+        } else {
+          ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+              messageSection
+              imageSection
+              pinSection
+              sharePINSection
+              actionSection
+            }
+            .padding(16)
+          }
+          .scrollDismissesKeyboard(.interactively)
         }
-        .padding(16)
       }
-      .scrollDismissesKeyboard(.interactively)
       .background(Color.black)
       .navigationTitle("cryptoscreen")
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          if context.selectedMessageLink != nil {
+            Button("Create") {
+              context.createNewMessage()
+            }
+            .foregroundStyle(.green)
+          } else {
+            EmptyView()
+          }
+        }
+      }
       .navigationBarTitleDisplayMode(.inline)
       .toolbarColorScheme(.dark, for: .navigationBar)
       .task(id: selectedPhotoItem) {
@@ -384,6 +403,113 @@ struct MessagesComposeView: View {
   private enum Field {
     case message
     case pin
+  }
+}
+
+private struct MessagesOpenSelectedView: View {
+  @ObservedObject var context: MessagesComposeContext
+  let link: URL
+
+  @State private var isOpening = false
+  @State private var statusText = "Open in cryptoscreen for the hand-cover reveal reader."
+  @State private var statusColor = Color.secondary
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Open securely")
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.white)
+
+          Text("Use the cryptoscreen app or App Clip to reveal this message. The iMessage drawer will not decrypt or consume it.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+
+        LinkSummary(link: link)
+
+        Button {
+          Task {
+            await openInCryptoscreen()
+          }
+        } label: {
+          Label(isOpening ? "Opening..." : "Open in cryptoscreen", systemImage: isOpening ? "hourglass" : "arrow.up.forward.app")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(MessagesPrimaryButtonStyle())
+        .disabled(isOpening)
+
+        Text(statusText)
+          .font(.footnote)
+          .foregroundStyle(statusColor)
+
+        Button {
+          context.createNewMessage()
+        } label: {
+          Label("Create message", systemImage: "square.and.pencil")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(MessagesSecondaryButtonStyle())
+      }
+      .padding(16)
+    }
+    .scrollDismissesKeyboard(.interactively)
+    .navigationTitle("cryptoscreen")
+  }
+
+  private func openInCryptoscreen() async {
+    guard !isOpening else {
+      return
+    }
+
+    isOpening = true
+    statusText = "Opening cryptoscreen..."
+    statusColor = .secondary
+
+    let didOpen = await context.openInCryptoscreen(link)
+
+    await MainActor.run {
+      isOpening = false
+
+      if didOpen {
+        statusText = "Opened in cryptoscreen."
+        statusColor = .green
+      } else {
+        statusText = "Could not open cryptoscreen. You can still create your own message here."
+        statusColor = .orange
+      }
+    }
+  }
+}
+
+private struct LinkSummary: View {
+  let link: URL
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Selected message")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+
+      Text(link.host ?? "cryptoscreen.app")
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.white)
+
+      Text(link.path)
+        .font(.caption.monospaced())
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+    .padding(12)
+    .background(Color.white.opacity(0.08))
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+    )
   }
 }
 
