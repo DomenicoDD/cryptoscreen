@@ -1740,6 +1740,8 @@ function privacyPage(env: Env): string {
         <p>Screenshot reporting is opt-in in the app's Privacy settings. If it is off, the app still clears the visible reader when iOS reports a screenshot, but it does not send a screenshot report to the server. If it is on, the app sends only a generic screenshot event and timestamp for that message. Screenshot detection is best-effort: iOS reports normal screenshots after capture, modified clients can omit reporting, and external cameras cannot be detected.</p>
         <p>The service also keeps an aggregate count of how many sealed messages have been shared. That counter does not include message content, recipients, senders, or link secrets.</p>
         <p>If you send feedback from inside the app, the service processes the rating, feedback text, app version/build, platform/device information, and timestamp to deliver that support request to the maintainer.</p>
+        <h2>TestFlight beta data</h2>
+        <p>During TestFlight beta testing, Apple separately collects crash logs, beta usage information, and any feedback you submit through TestFlight, then shares that information with the app provider under Apple's TestFlight privacy terms. This is Apple beta-testing infrastructure, not a cryptoscreen tracking SDK. Public-link testers' name and email address are not displayed to the developer by Apple. If you were invited directly by email, Apple may show the invited tester name and email in TestFlight. The App Store release will not use TestFlight.</p>
         <h2>Operational data</h2>
         <p>Cloudflare, Neon, and Cloudflare R2 provide the infrastructure for the public site, API, database, and encrypted attachment storage. They may process standard infrastructure logs needed to operate, secure, and debug the service. cryptoscreen application logs must not intentionally include plaintext, PINs, proofs, full message links, or raw image data.</p>
         <h2>Limits</h2>
@@ -1765,7 +1767,7 @@ function termsPage(env: Env): string {
         <h2>Availability and deletion</h2>
         <p>Normal user messages are intended to be available for one successful read, destroyed after the third wrong PIN attempt, manually expired by the sender, or expired after ${LINK_RETENTION_DAYS} days if unopened. Deleted or expired messages cannot be recovered by cryptoscreen. Because unavailable links stop opening, people with the link may be able to infer that one of those events happened.</p>
         <h2>Beta status</h2>
-        <p>The service may change during beta. Do not use cryptoscreen as the only copy of important information.</p>
+        <p>The service may change during beta. Do not use cryptoscreen as the only copy of important information. If you install through TestFlight, Apple's TestFlight beta terms also apply. Apple may collect crash logs, beta usage information, and TestFlight feedback and share them with the app provider. This TestFlight channel is separate from cryptoscreen's own app telemetry choices and will not apply to the normal App Store release.</p>
         <h2>Privacy</h2>
         <p>The Privacy & Security Policy explains what data is stored, what is not stored, and which optional reports can be enabled in the app.</p>
       </section>
@@ -1792,6 +1794,8 @@ function supportPage(env: Env): string {
         </p>
         <h2>Safety note</h2>
         <p>Screenshot and screen recording protections are best-effort iOS protections. They reduce accidental exposure but cannot guarantee protection against external cameras or compromised devices. Screenshot reporting to the sender is opt-in in the app's Privacy settings.</p>
+        <h2>TestFlight note</h2>
+        <p>Apple's TestFlight warning is standard for beta apps. TestFlight can share crash logs, beta usage information, and submitted beta feedback with the app provider. cryptoscreen does not add ad tracking SDKs or third-party analytics SDKs.</p>
       </section>
     `
   );
