@@ -52,8 +52,8 @@ struct PrivacyReaderView: View {
 
   var body: some View {
     GeometryReader { proxy in
-      let touchButtonTop: CGFloat = 8
-      let touchButtonSize = CGSize(width: max(proxy.size.width - 40, 180), height: 58)
+      let touchButtonTop = max(proxy.safeAreaInsets.top + 44, 84)
+      let touchButtonSize = CGSize(width: proxy.size.width * 0.70, height: 58)
       let touchZone = CGRect(
         x: (proxy.size.width - touchButtonSize.width) / 2,
         y: touchButtonTop,

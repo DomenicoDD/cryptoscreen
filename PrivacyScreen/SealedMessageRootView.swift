@@ -31,6 +31,27 @@ private func demoCardImageData() -> Data? {
   UIImage(named: demoCardImageAssetName)?.pngData()
 }
 
+private func demoCardImage() -> UIImage {
+  if let image = UIImage(named: demoCardImageAssetName) {
+    return image
+  }
+
+  let renderer = UIGraphicsImageRenderer(size: CGSize(width: 900, height: 1200))
+  return renderer.image { context in
+    UIColor(red: 0.04, green: 0.04, blue: 0.04, alpha: 1).setFill()
+    context.fill(CGRect(x: 0, y: 0, width: 900, height: 1200))
+    UIColor(red: 0.72, green: 0.72, blue: 0.68, alpha: 1).setFill()
+    let title = "Cryptoscreen" as NSString
+    title.draw(
+      at: CGPoint(x: 120, y: 360),
+      withAttributes: [
+        .font: UIFont.systemFont(ofSize: 72, weight: .semibold),
+        .foregroundColor: UIColor(red: 0.72, green: 0.72, blue: 0.68, alpha: 1)
+      ]
+    )
+  }
+}
+
 enum SentMessageStatus: String, Codable {
   case active
   case consumed
@@ -830,6 +851,11 @@ private struct SentMessageMetric: View {
 }
 
 private struct ComposeSealedMessageView: View {
+  private enum FocusedField: Hashable {
+    case message
+    case pin
+  }
+
   @ObservedObject var store: SealedMessageStore
   let title: String
   let onCreatedLink: (URL) -> Void
@@ -855,6 +881,8 @@ private struct ComposeSealedMessageView: View {
   @State private var showsOnboardingImageStep = false
   @State private var showsOnboardingPinStep = false
   @State private var onboardingRevealTask: Task<Void, Never>?
+  @State private var isOnboardingPINRevealPending = false
+  @FocusState private var focusedField: FocusedField?
 
   init(
     store: SealedMessageStore,
@@ -923,6 +951,7 @@ private struct ComposeSealedMessageView: View {
             hasEditedMessage = false
             showsOnboardingImageStep = false
             showsOnboardingPinStep = false
+            isOnboardingPINRevealPending = false
             onboardingRevealTask?.cancel()
             createdMessage = nil
             createdPlaintext = nil
@@ -934,6 +963,7 @@ private struct ComposeSealedMessageView: View {
             .font(.system(size: 16, weight: .regular, design: .rounded))
             .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
             .scrollContentBackground(.hidden)
+            .focused($focusedField, equals: .message)
             .frame(minHeight: 146)
             .padding(12)
             .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
@@ -983,6 +1013,7 @@ private struct ComposeSealedMessageView: View {
             }
 
             PinEntryField(pin: $pin, placeholder: "PIN", accessibilityLabel: "Create message PIN")
+              .focused($focusedField, equals: .pin)
           }
           .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
@@ -1013,8 +1044,19 @@ private struct ComposeSealedMessageView: View {
 
       if usesProgressiveOnboarding, !hasEditedMessage, !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         hasEditedMessage = true
-        revealOnboardingImageAndPIN()
+        revealOnboardingImageStep()
+        scheduleOnboardingPINReveal()
       }
+    }
+    .onChange(of: focusedField) { oldValue, newValue in
+      guard usesProgressiveOnboarding,
+            oldValue == .message,
+            newValue != .message,
+            isOnboardingPINRevealPending else {
+        return
+      }
+
+      scheduleOnboardingPINReveal()
     }
 #if !APPCLIP
     .onChange(of: selectedPhotoItem) { _, newValue in
@@ -1025,6 +1067,15 @@ private struct ComposeSealedMessageView: View {
 #endif
     .onDisappear {
       onboardingRevealTask?.cancel()
+    }
+    .toolbar {
+      ToolbarItemGroup(placement: .keyboard) {
+        Spacer()
+
+        Button("Done") {
+          focusedField = nil
+        }
+      }
     }
   }
 
@@ -1153,28 +1204,35 @@ private struct ComposeSealedMessageView: View {
       hasEditedMessage = false
       showsOnboardingImageStep = false
       showsOnboardingPinStep = false
+      isOnboardingPINRevealPending = false
       onboardingRevealTask?.cancel()
     }
   }
 
-  private func revealOnboardingImageAndPIN() {
-    onboardingRevealTask?.cancel()
-    onboardingRevealTask = Task {
-      await MainActor.run {
-        withAnimation(.easeOut(duration: 0.22)) {
-          showsOnboardingImageStep = true
-        }
-      }
+  private func revealOnboardingImageStep() {
+    withAnimation(.easeOut(duration: 0.22)) {
+      showsOnboardingImageStep = true
+    }
+  }
 
+  private func scheduleOnboardingPINReveal() {
+    onboardingRevealTask?.cancel()
+    isOnboardingPINRevealPending = true
+    onboardingRevealTask = Task {
       try? await Task.sleep(nanoseconds: 600_000_000)
       guard !Task.isCancelled else {
         return
       }
 
       await MainActor.run {
+        guard focusedField != .message else {
+          return
+        }
+
         withAnimation(.easeOut(duration: 0.22)) {
           showsOnboardingPinStep = true
         }
+        isOnboardingPINRevealPending = false
       }
     }
   }
@@ -1752,7 +1810,10 @@ private struct AttachmentImageReaderView: View {
   let image: UIImage
   private let pixelatedImage: UIImage
   @Binding var showsImage: Bool
-  let onClose: () -> Void
+  let onClose: (() -> Void)?
+  let showsModeSwitch: Bool
+  let onRevealPerformed: () -> Void
+  let onImageInteractionPerformed: () -> Void
 
   @StateObject private var proximitySensor = ProximitySensor()
   @State private var showsTouchHint = false
@@ -1761,22 +1822,34 @@ private struct AttachmentImageReaderView: View {
   @State private var lastScale: CGFloat = 1
   @State private var offset: CGSize = .zero
   @State private var lastOffset: CGSize = .zero
+  @State private var didReportReveal = false
+  @State private var didReportImageInteraction = false
 
   private var revealActive: Bool {
     proximitySensor.isRevealActive
   }
 
-  init(image: UIImage, showsImage: Binding<Bool>, onClose: @escaping () -> Void) {
+  init(
+    image: UIImage,
+    showsImage: Binding<Bool>,
+    onClose: (() -> Void)?,
+    showsModeSwitch: Bool = true,
+    onRevealPerformed: @escaping () -> Void = {},
+    onImageInteractionPerformed: @escaping () -> Void = {}
+  ) {
     self.image = image
     self.pixelatedImage = image.pixelatedForPrivacy()
     _showsImage = showsImage
     self.onClose = onClose
+    self.showsModeSwitch = showsModeSwitch
+    self.onRevealPerformed = onRevealPerformed
+    self.onImageInteractionPerformed = onImageInteractionPerformed
   }
 
   var body: some View {
     GeometryReader { proxy in
-      let touchButtonTop: CGFloat = 8
-      let touchButtonSize = CGSize(width: max(proxy.size.width - 40, 180), height: 58)
+      let touchButtonTop = max(proxy.safeAreaInsets.top + 44, 84)
+      let touchButtonSize = CGSize(width: proxy.size.width * 0.70, height: 58)
       let touchZone = CGRect(
         x: (proxy.size.width - touchButtonSize.width) / 2,
         y: touchButtonTop,
@@ -1831,6 +1904,7 @@ private struct AttachmentImageReaderView: View {
         .gesture(
           DragGesture(minimumDistance: 0)
             .onChanged { value in
+              markImageInteractionIfNeeded(value.translation)
               let proposedOffset = CGSize(
                 width: lastOffset.width + value.translation.width,
                 height: lastOffset.height + value.translation.height
@@ -1845,6 +1919,7 @@ private struct AttachmentImageReaderView: View {
         .simultaneousGesture(
           MagnificationGesture()
             .onChanged { value in
+              markImageInteractionIfNeeded(value)
               scale = min(max(lastScale * value, 1), 5)
               offset = clampedOffset(offset, displaySize: fittedImageSize, viewportSize: proxy.size, revealZone: revealZone, scale: scale)
             }
@@ -1879,25 +1954,31 @@ private struct AttachmentImageReaderView: View {
         .position(x: touchZone.midX, y: touchZone.midY)
         .accessibilityHidden(true)
 
-        HStack(spacing: 10) {
-          Button {
-            onClose()
-          } label: {
-            Image(systemName: "xmark")
-              .font(.system(size: 15, weight: .bold))
-              .frame(width: 44, height: 44)
-          }
-          .buttonStyle(SecondaryActionButtonStyle())
-          .accessibilityLabel("Close message")
+        if onClose != nil || showsModeSwitch {
+          HStack(spacing: 10) {
+            if let onClose {
+              Button {
+                onClose()
+              } label: {
+                Image(systemName: "xmark")
+                  .font(.system(size: 15, weight: .bold))
+                  .frame(width: 44, height: 44)
+              }
+              .buttonStyle(SecondaryActionButtonStyle())
+              .accessibilityLabel("Close message")
+            }
 
-          ReaderModeSwitch(showsImage: $showsImage)
-            .frame(maxWidth: .infinity)
-            .padding(4)
-            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            if showsModeSwitch {
+              ReaderModeSwitch(showsImage: $showsImage)
+                .frame(maxWidth: .infinity)
+                .padding(4)
+                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            }
+          }
+          .padding(.horizontal, 20)
+          .padding(.bottom, 18)
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 18)
       }
       .textSelection(.disabled)
       .onAppear {
@@ -1925,9 +2006,44 @@ private struct AttachmentImageReaderView: View {
       .onChange(of: revealActive) { _, isActive in
         if isActive {
           softHaptic()
+          markRevealed()
         }
       }
     }
+  }
+
+  private func markRevealed() {
+    guard !didReportReveal else {
+      return
+    }
+
+    didReportReveal = true
+    onRevealPerformed()
+  }
+
+  private func markImageInteractionIfNeeded(_ translation: CGSize) {
+    guard abs(translation.width) > 24 || abs(translation.height) > 24 else {
+      return
+    }
+
+    markImageInteraction()
+  }
+
+  private func markImageInteractionIfNeeded(_ magnification: CGFloat) {
+    guard abs(magnification - 1) > 0.08 else {
+      return
+    }
+
+    markImageInteraction()
+  }
+
+  private func markImageInteraction() {
+    guard !didReportImageInteraction else {
+      return
+    }
+
+    didReportImageInteraction = true
+    onImageInteractionPerformed()
   }
 
   private func clampedOffset(_ proposedOffset: CGSize, displaySize: CGSize, viewportSize: CGSize, revealZone: CGRect, scale: CGFloat) -> CGSize {
@@ -2011,8 +2127,28 @@ private struct ActiveRevealWindowOverlay: View {
   }
 }
 
+private struct ImageMoveTeachingPill: View {
+  @State private var moves = false
+
+  var body: some View {
+    Image(systemName: "arrow.up.left.and.arrow.down.right")
+      .font(.system(size: 18, weight: .semibold))
+      .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70))
+      .frame(width: 54, height: 54)
+      .background(Color.white.opacity(0.08), in: Circle())
+      .overlay(Circle().stroke(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.42), lineWidth: 1))
+      .offset(x: moves ? 10 : -10, y: moves ? 8 : -8)
+      .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: moves)
+      .onAppear {
+        moves = true
+      }
+      .accessibilityHidden(true)
+  }
+}
+
 private enum OnboardingStep {
   case reader
+  case imageReader
   case create
 }
 
@@ -2023,11 +2159,18 @@ private struct OnboardingView: View {
   @State private var step: OnboardingStep = .reader
   @State private var didRevealMessage = false
   @State private var didScrollMessage = false
+  @State private var didRevealImage = false
+  @State private var didMoveImage = false
+  @State private var showsOnboardingImage = true
   @State private var senderPreviewSession: SenderPreviewSession?
   @State private var showsReviewPrompt = false
 
   private var canAdvanceFromReader: Bool {
     didRevealMessage && didScrollMessage
+  }
+
+  private var canAdvanceFromImageReader: Bool {
+    didRevealImage && didMoveImage
   }
 
   var body: some View {
@@ -2049,6 +2192,41 @@ private struct OnboardingView: View {
         )
 
         if canAdvanceFromReader {
+          Button {
+            withAnimation(.easeInOut(duration: 0.22)) {
+              step = .imageReader
+            }
+            softHaptic()
+          } label: {
+            Label("Next", systemImage: "arrow.right")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(PrimaryActionButtonStyle())
+          .padding(.horizontal, 20)
+          .padding(.bottom, 28)
+          .transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
+      case .imageReader:
+        AttachmentImageReaderView(
+          image: demoCardImage(),
+          showsImage: $showsOnboardingImage,
+          onClose: nil,
+          showsModeSwitch: false,
+          onRevealPerformed: {
+            didRevealImage = true
+          },
+          onImageInteractionPerformed: {
+            didMoveImage = true
+          }
+        )
+
+        if didRevealImage && !didMoveImage {
+          ImageMoveTeachingPill()
+            .padding(.bottom, 110)
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
+
+        if canAdvanceFromImageReader {
           Button {
             withAnimation(.easeInOut(duration: 0.22)) {
               step = .create

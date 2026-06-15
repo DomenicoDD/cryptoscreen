@@ -27,6 +27,12 @@
 		0A0010020000000000000009 /* PrivacyScreenClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000012 /* PrivacyScreenClipApp.swift */; };
 		0A001002000000000000000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000005 /* Assets.xcassets */; };
 		0A001002000000000000000B /* PrivacyScreenClip.app in Embed App Clips */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000013 /* PrivacyScreenClip.app */; };
+		0B0010010000000000000001 /* MessagesViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000001 /* MessagesViewController.swift */; };
+		0B0010010000000000000002 /* MessagesComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000002 /* MessagesComposeView.swift */; };
+		0B0010010000000000000003 /* MessagesSenderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000003 /* MessagesSenderService.swift */; };
+		0B0010010000000000000004 /* SealedMessageCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000007 /* SealedMessageCrypto.swift */; };
+		0B0010010000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000005 /* Assets.xcassets */; };
+		0B0010010000000000000006 /* PrivacyScreenMessagesExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000006 /* PrivacyScreenMessagesExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +42,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 0A0050010000000000000002;
 			remoteInfo = PrivacyScreenClip;
+		};
+		0B00B0010000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0A0080010000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0B0050010000000000000001;
+			remoteInfo = PrivacyScreenMessagesExtension;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -55,6 +68,12 @@
 		0A0020010000000000000013 /* PrivacyScreenClip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrivacyScreenClip.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0020010000000000000014 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0A0020010000000000000015 /* PrivacyScreenClip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PrivacyScreenClip.entitlements; sourceTree = "<group>"; };
+		0B0020010000000000000001 /* MessagesViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesViewController.swift; sourceTree = "<group>"; };
+		0B0020010000000000000002 /* MessagesComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesComposeView.swift; sourceTree = "<group>"; };
+		0B0020010000000000000003 /* MessagesSenderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesSenderService.swift; sourceTree = "<group>"; };
+		0B0020010000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		0B0020010000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		0B0020010000000000000006 /* PrivacyScreenMessagesExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PrivacyScreenMessagesExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +91,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0B0030010000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -80,6 +106,7 @@
 			children = (
 				0A0040010000000000000002 /* PrivacyScreen */,
 				0A0040010000000000000004 /* PrivacyScreenClip */,
+				0B0040010000000000000001 /* PrivacyScreenMessagesExtension */,
 				0A0040010000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -107,6 +134,7 @@
 			children = (
 				0A0020010000000000000006 /* PrivacyScreen.app */,
 				0A0020010000000000000013 /* PrivacyScreenClip.app */,
+				0B0020010000000000000006 /* PrivacyScreenMessagesExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -120,6 +148,18 @@
 			path = PrivacyScreenClip;
 			sourceTree = "<group>";
 		};
+		0B0040010000000000000001 /* PrivacyScreenMessagesExtension */ = {
+			isa = PBXGroup;
+			children = (
+				0B0020010000000000000001 /* MessagesViewController.swift */,
+				0B0020010000000000000002 /* MessagesComposeView.swift */,
+				0B0020010000000000000003 /* MessagesSenderService.swift */,
+				0B0020010000000000000004 /* Info.plist */,
+				0B0020010000000000000005 /* Assets.xcassets */,
+			);
+			path = PrivacyScreenMessagesExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -130,12 +170,14 @@
 				0A0070010000000000000001 /* Sources */,
 				0A0030010000000000000001 /* Frameworks */,
 				0A0060010000000000000001 /* Resources */,
+				0B0060020000000000000001 /* Embed App Extensions */,
 				0A0060010000000000000003 /* Embed App Clips */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				0A00B0020000000000000001 /* PBXTargetDependency */,
+				0B00B0020000000000000001 /* PBXTargetDependency */,
 			);
 			name = PrivacyScreen;
 			productName = PrivacyScreen;
@@ -159,6 +201,23 @@
 			productReference = 0A0020010000000000000013 /* PrivacyScreenClip.app */;
 			productType = "com.apple.product-type.application.on-demand-install-capable";
 		};
+		0B0050010000000000000001 /* PrivacyScreenMessagesExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0B0090010000000000000001 /* Build configuration list for PBXNativeTarget "PrivacyScreenMessagesExtension" */;
+			buildPhases = (
+				0B0070010000000000000001 /* Sources */,
+				0B0030010000000000000001 /* Frameworks */,
+				0B0060010000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PrivacyScreenMessagesExtension;
+			productName = PrivacyScreenMessagesExtension;
+			productReference = 0B0020010000000000000006 /* PrivacyScreenMessagesExtension.appex */;
+			productType = "com.apple.product-type.app-extension.messages";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -173,6 +232,9 @@
 						CreatedOnToolsVersion = 26.5;
 					};
 					0A0050010000000000000002 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					0B0050010000000000000001 = {
 						CreatedOnToolsVersion = 26.5;
 					};
 				};
@@ -192,6 +254,7 @@
 			targets = (
 				0A0050010000000000000001 /* PrivacyScreen */,
 				0A0050010000000000000002 /* PrivacyScreenClip */,
+				0B0050010000000000000001 /* PrivacyScreenMessagesExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -222,6 +285,25 @@
 				0A001002000000000000000B /* PrivacyScreenClip.app in Embed App Clips */,
 			);
 			name = "Embed App Clips";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0B0060010000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0B0010010000000000000005 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0B0060020000000000000001 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0B0010010000000000000006 /* PrivacyScreenMessagesExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -258,6 +340,17 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0B0070010000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0B0010010000000000000001 /* MessagesViewController.swift in Sources */,
+				0B0010010000000000000002 /* MessagesComposeView.swift in Sources */,
+				0B0010010000000000000003 /* MessagesSenderService.swift in Sources */,
+				0B0010010000000000000004 /* SealedMessageCrypto.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -265,6 +358,11 @@
 			isa = PBXTargetDependency;
 			target = 0A0050010000000000000002 /* PrivacyScreenClip */;
 			targetProxy = 0A00B0010000000000000001 /* PBXContainerItemProxy */;
+		};
+		0B00B0020000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0B0050010000000000000001 /* PrivacyScreenMessagesExtension */;
+			targetProxy = 0B00B0010000000000000001 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -391,7 +489,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreen/PrivacyScreen.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -421,7 +519,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreen/PrivacyScreen.entitlements;
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -451,7 +549,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreenClip/PrivacyScreenClip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = PrivacyScreenClip/Info.plist;
@@ -481,7 +579,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreenClip/PrivacyScreenClip.entitlements;
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = PrivacyScreenClip/Info.plist;
@@ -498,6 +596,68 @@
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = APPCLIP;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		0B0100010000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 14;
+				DEVELOPMENT_TEAM = J7C56736F3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PrivacyScreenMessagesExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.domenico.privacyscreen.MessagesExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		0B0100010000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
+				CODE_SIGN_IDENTITY = "iPhone Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 14;
+				DEVELOPMENT_TEAM = J7C56736F3;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PrivacyScreenMessagesExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.domenico.privacyscreen.MessagesExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "cryptoscreen MessagesExtension local cert 06/26";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -530,6 +690,15 @@
 			buildConfigurations = (
 				0A0100010000000000000005 /* Debug */,
 				0A0100010000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0B0090010000000000000001 /* Build configuration list for PBXNativeTarget "PrivacyScreenMessagesExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0B0100010000000000000001 /* Debug */,
+				0B0100010000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
