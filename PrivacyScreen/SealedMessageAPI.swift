@@ -397,6 +397,7 @@ private struct SubmitFeedbackResponse: Decodable {
 private struct ReadSessionEventRequest: Encodable {
   let type: String
   let timestamp: String
+  let clientOptIn = true
 }
 
 private struct ReadSessionEventResponse: Decodable {

@@ -11,6 +11,7 @@ private let maxFeedbackCharacterCount = 2_000
 private let proImageAttachmentsEnabled = true
 private let demoCardImageAssetName = "DemoCard"
 private let sentMessagesStorageKey = "cryptoscreen.sentMessages"
+private let screenshotReportingOptInKey = "cryptoscreen.reporting.screenshotEvents"
 private let onboardingReaderMessage = """
 This is a cryptoscreen message.
 
@@ -368,6 +369,7 @@ struct SealedMessageRootView: View {
   @State private var incomingPIN = ""
   @State private var isShowingOnboarding = false
   @State private var isShowingSentMessages = false
+  @State private var isShowingPrivacySettings = false
 
   var body: some View {
     CaptureShield {
@@ -383,6 +385,9 @@ struct SealedMessageRootView: View {
             },
             onShowOnboarding: {
               isShowingOnboarding = true
+            },
+            onShowPrivacySettings: {
+              isShowingPrivacySettings = true
             }
           )
 
@@ -456,6 +461,10 @@ struct SealedMessageRootView: View {
       SentMessagesView(store: store)
         .presentationDetents([.medium, .large])
     }
+    .sheet(isPresented: $isShowingPrivacySettings) {
+      PrivacySettingsView()
+        .presentationDetents([.medium])
+    }
 #if !APPCLIP
     .fullScreenCover(isPresented: $isShowingOnboarding) {
       OnboardingView(store: store) {
@@ -481,6 +490,7 @@ private struct HeaderView: View {
   let pendingCount: Int
   let onShowSentMessages: () -> Void
   let onShowOnboarding: () -> Void
+  let onShowPrivacySettings: () -> Void
 
   var body: some View {
     HStack(alignment: .center) {
@@ -519,6 +529,12 @@ private struct HeaderView: View {
           }
 #endif
 
+          Button {
+            onShowPrivacySettings()
+          } label: {
+            Label("Privacy settings", systemImage: "hand.raised.fill")
+          }
+
           Link(destination: URL(string: "https://github.com/DomenicoDD/cryptoscreen")!) {
             Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
           }
@@ -541,6 +557,75 @@ private struct HeaderView: View {
     .padding(.horizontal, 20)
     .padding(.top, 18)
     .padding(.bottom, 18)
+  }
+}
+
+private struct PrivacySettingsView: View {
+  @Environment(\.dismiss) private var dismiss
+  @AppStorage(screenshotReportingOptInKey) private var reportsScreenshotEvents = false
+
+  var body: some View {
+    ZStack {
+      Color(red: 0.045, green: 0.047, blue: 0.043)
+        .ignoresSafeArea()
+
+      VStack(alignment: .leading, spacing: 18) {
+        HStack(alignment: .center) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Privacy settings")
+              .font(.system(size: 24, weight: .semibold, design: .rounded))
+              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+
+            Text("Telemetry stays minimal and visible.")
+              .font(.system(size: 13, weight: .medium, design: .rounded))
+              .foregroundStyle(Color.white.opacity(0.56))
+          }
+
+          Spacer()
+
+          Button {
+            dismiss()
+            softHaptic()
+          } label: {
+            Image(systemName: "xmark")
+              .font(.system(size: 15, weight: .bold))
+              .frame(width: 40, height: 40)
+              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .background(Color.white.opacity(0.08), in: Circle())
+              .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
+          }
+          .accessibilityLabel("Close privacy settings")
+        }
+
+        VStack(alignment: .leading, spacing: 12) {
+          Toggle(isOn: $reportsScreenshotEvents) {
+            VStack(alignment: .leading, spacing: 5) {
+              Text("Report screenshots to sender")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+
+              Text("Off by default. When enabled, if iOS reports a screenshot while you read a sealed message, cryptoscreen sends only a screenshot event and timestamp for that message. It never sends plaintext, image bytes, PINs, contacts, or the link secret.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.58))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+          .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
+
+          Text("One-time message status is still processed by the server to enforce deletion, expiry, and wrong-PIN destruction.")
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(Color.white.opacity(0.48))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+
+        Spacer()
+      }
+      .padding(.horizontal, 20)
+      .padding(.top, 22)
+    }
   }
 }
 
@@ -1652,6 +1737,7 @@ private struct PinEntryField: View {
 private struct SecureReaderSessionView: View {
   @Environment(\.dismiss) private var dismiss
   @ObservedObject var store: SealedMessageStore
+  @AppStorage(screenshotReportingOptInKey) private var reportsScreenshotEvents = false
   @State private var openedMessage: OpenedSealedMessage
   @State private var showsImage: Bool
 
@@ -1702,7 +1788,7 @@ private struct SecureReaderSessionView: View {
     dismiss()
     warningHaptic()
 
-    if let eventPath {
+    if reportsScreenshotEvents, let eventPath {
       Task {
         await store.reportScreenshot(eventPath: eventPath)
       }

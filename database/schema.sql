@@ -340,6 +340,7 @@ as $$
 declare
   deleted_messages bigint;
   deleted_sessions bigint;
+  deleted_audits bigint;
 begin
   update cryptoscreen.sealed_message_delivery_audit
   set
@@ -362,7 +363,12 @@ begin
   where expires_at <= now();
 
   get diagnostics deleted_sessions = row_count;
-  return deleted_messages + deleted_sessions;
+
+  delete from cryptoscreen.sealed_message_delivery_audit
+  where updated_at <= now() - interval '30 days';
+
+  get diagnostics deleted_audits = row_count;
+  return deleted_messages + deleted_sessions + deleted_audits;
 end;
 $$;
 

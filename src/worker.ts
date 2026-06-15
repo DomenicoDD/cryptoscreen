@@ -64,6 +64,7 @@ type FeedbackBody = {
 type ReadSessionEventBody = {
   type: "screenshot";
   timestamp: string;
+  clientOptIn: true;
 };
 
 type CreateMessageRow = {
@@ -209,6 +210,10 @@ export default {
 
       if (url.pathname === "/privacy") {
         return htmlResponse(privacyPage(env));
+      }
+
+      if (url.pathname === "/terms") {
+        return htmlResponse(termsPage(env));
       }
 
       if (url.pathname === "/support") {
@@ -963,6 +968,10 @@ async function deleteExpiredMessages(env: Env): Promise<void> {
   }
 
   await sql`select cryptoscreen.delete_expired_sealed_messages()`;
+  await sql`
+    delete from cryptoscreen.sealed_message_delivery_audit
+    where updated_at <= now() - interval '30 days'
+  `;
 }
 
 async function readJson(request: Request): Promise<unknown> {
@@ -1058,6 +1067,10 @@ function parseReadSessionEventBody(value: unknown): ReadSessionEventBody {
     throw new HttpError(400, "invalid_event_type", "Only screenshot events are supported.");
   }
 
+  if (body.clientOptIn !== true) {
+    throw new HttpError(403, "event_reporting_opt_in_required", "Screenshot reporting requires explicit client opt-in.");
+  }
+
   const timestamp = expectString(body.timestamp, "timestamp").trim();
   if (timestamp.length > MAX_FEEDBACK_TIMESTAMP_CHARS || Number.isNaN(Date.parse(timestamp))) {
     throw new HttpError(400, "invalid_timestamp", "timestamp must be a valid ISO-8601 date string.");
@@ -1065,7 +1078,8 @@ function parseReadSessionEventBody(value: unknown): ReadSessionEventBody {
 
   return {
     type,
-    timestamp
+    timestamp,
+    clientOptIn: true
   };
 }
 
@@ -1707,25 +1721,52 @@ function messagePage(url: URL, env: Env): string {
 
 function privacyPage(env: Env): string {
   return pageShell(
-    "Privacy Policy",
+    "Privacy & Security Policy",
     env,
     `
       <section class="panel prose">
-        <p class="eyebrow">Privacy Policy</p>
-        <h1>cryptoscreen Privacy Policy</h1>
-        <p>cryptoscreen is designed for one-time encrypted messages. Message plaintext is encrypted on the sender device before upload and is not stored by the service.</p>
-        <h2>What the service stores</h2>
-        <p>The production API stores encrypted message bytes, nonce, tag, salt, expiry time, and failed attempt count. When a sender attaches an image, the service stores encrypted image object bytes in private R2 storage plus encrypted attachment metadata in Neon. User message rows and attachment metadata are deleted after a successful read, after the third wrong PIN, or after expiry cleanup. Unused user links expire after ${LINK_RETENTION_DAYS} days.</p>
-        <p>After a successful read with an image attachment, the app downloads the encrypted image bytes through a one-time read session. The R2 object is deleted after that one-time download. Expired attachment objects are deleted by scheduled cleanup.</p>
-        <p>Service-owned retained review/demo rows may remain reusable for Apple App Review and TestFlight invocation testing. These rows must contain only demo text, not private user content.</p>
+        <p class="eyebrow">Privacy & Security Policy</p>
+        <h1>cryptoscreen Privacy & Security Policy</h1>
+        <p>cryptoscreen is designed for one-time encrypted messages. The note is encrypted on the sender device before upload. The service is designed not to receive plaintext, raw image bytes, PINs, decryption keys, contact lists, or account profiles.</p>
+        <h2>What the server cannot read</h2>
+        <p>The server stores ciphertext and encrypted attachment bytes only. The decryption secret is kept in the URL fragment after <code>#s=</code>, which browsers do not send to the server in normal HTTP requests. The six-digit PIN is entered locally and is not stored by the service.</p>
+        <h2>What the service stores to make messages work</h2>
+        <p>The production API stores encrypted message bytes, nonce, tag, salt, expiry time, failed attempt count, and a server-peppered PIN verifier. When a sender attaches an image, the service stores encrypted image object bytes in private R2 storage plus encrypted attachment metadata in Neon. User message rows and attachment metadata are deleted after a successful read, after the third wrong PIN, or after expiry cleanup. Unused user links expire after ${LINK_RETENTION_DAYS} days.</p>
+        <p>After a successful read with an image attachment, the app downloads the encrypted image bytes through a short-lived one-time read session. The R2 object is deleted after that one-time download. Expired attachment objects and read sessions are deleted by scheduled cleanup.</p>
+        <h2>Status data and telemetry</h2>
+        <p>cryptoscreen does not use ad SDKs, tracking SDKs, third-party analytics SDKs, or contact upload. There is no account profile.</p>
+        <p>To power the sender's local sent-message list, the service keeps minimal delivery-status metadata for a message id: whether the text was consumed, whether an encrypted image attachment existed, whether that image was consumed, whether the row expired or was destroyed, and whether a screenshot event was reported. This status metadata does not include plaintext, image plaintext, PINs, link secrets, sender identity, recipient identity, or contact data. Delivery-status metadata is deleted by scheduled cleanup after it has been inactive for about ${LINK_RETENTION_DAYS} days.</p>
+        <p>Screenshot reporting is opt-in in the app's Privacy settings. If it is off, the app still clears the visible reader when iOS reports a screenshot, but it does not send a screenshot report to the server. If it is on, the app sends only a generic screenshot event and timestamp for that message. Screenshot detection is best-effort: iOS reports normal screenshots after capture, modified clients can omit reporting, and external cameras cannot be detected.</p>
         <p>The service also keeps an aggregate count of how many sealed messages have been shared. That counter does not include message content, recipients, senders, or link secrets.</p>
         <p>If you send feedback from inside the app, the service processes the rating, feedback text, app version/build, platform/device information, and timestamp to deliver that support request to the maintainer.</p>
-        <h2>What is not stored</h2>
-        <p>The service does not intentionally store plaintext message content, the URL fragment secret, contact lists, or account profiles.</p>
         <h2>Operational data</h2>
-        <p>Cloudflare and Neon may process standard infrastructure logs needed to operate, secure, and debug the service.</p>
+        <p>Cloudflare, Neon, and Cloudflare R2 provide the infrastructure for the public site, API, database, and encrypted attachment storage. They may process standard infrastructure logs needed to operate, secure, and debug the service. cryptoscreen application logs must not intentionally include plaintext, PINs, proofs, full message links, or raw image data.</p>
+        <h2>Limits</h2>
+        <p>cryptoscreen cannot stop a recipient from photographing the screen with another device, using a compromised device, or saving content after it is legitimately displayed. The product promise is narrower: the service is designed not to be able to read your message content, and normal message rows are one-time by default.</p>
         <h2>Contact</h2>
         <p>For privacy requests, use the contact address on the support page.</p>
+      </section>
+    `
+  );
+}
+
+function termsPage(env: Env): string {
+  return pageShell(
+    "Terms of Service",
+    env,
+    `
+      <section class="panel prose">
+        <p class="eyebrow">Terms of Service</p>
+        <h1>cryptoscreen Terms of Service</h1>
+        <p>cryptoscreen is a beta tool for one-time encrypted notes. Use it only for content you are allowed to share and only with people you trust.</p>
+        <h2>Security model</h2>
+        <p>The service is designed so message plaintext, raw image bytes, PINs, and decryption keys are not available to the server. The app cannot protect content after a recipient has legitimately viewed it, and it cannot prevent external cameras, compromised devices, or modified clients.</p>
+        <h2>Availability and deletion</h2>
+        <p>Normal user messages are intended to be available for one successful read, destroyed after the third wrong PIN attempt, or expired after ${LINK_RETENTION_DAYS} days if unopened. Deleted or expired messages cannot be recovered by cryptoscreen.</p>
+        <h2>Beta status</h2>
+        <p>The service may change during beta. Do not use cryptoscreen as the only copy of important information.</p>
+        <h2>Privacy</h2>
+        <p>The Privacy & Security Policy explains what data is stored, what is not stored, and which optional reports can be enabled in the app.</p>
       </section>
     `
   );
@@ -1749,7 +1790,7 @@ function supportPage(env: Env): string {
           Follow development on <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a> or contact the maintainer on <a href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>.
         </p>
         <h2>Safety note</h2>
-        <p>Screenshot and screen recording protections are best-effort iOS protections. They reduce accidental exposure but cannot guarantee protection against external cameras or compromised devices.</p>
+        <p>Screenshot and screen recording protections are best-effort iOS protections. They reduce accidental exposure but cannot guarantee protection against external cameras or compromised devices. Screenshot reporting to the sender is opt-in in the app's Privacy settings.</p>
       </section>
     `
   );
@@ -2190,6 +2231,7 @@ function pageShell(title: string, env: Env, content: string, appArgument?: strin
         <a class="brand" href="/">cryptoscreen</a>
         <nav aria-label="Main">
           <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
           <a href="/support">Support</a>
           <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
           <a href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
@@ -2201,6 +2243,8 @@ function pageShell(title: string, env: Env, content: string, appArgument?: strin
         <span>cryptoscreen.app, one-time encrypted message beta</span>
         <span>
           <a href="/privacy">Privacy</a>
+          &nbsp;/&nbsp;
+          <a href="/terms">Terms</a>
           &nbsp;/&nbsp;
           <a href="/support">Support</a>
           &nbsp;/&nbsp;
