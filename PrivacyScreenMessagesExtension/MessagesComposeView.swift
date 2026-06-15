@@ -26,6 +26,7 @@ struct MessagesComposeView: View {
   private var canSeal: Bool {
     !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
     normalizedPIN.count == SealedMessageCrypto.pinLength &&
+    context.canInsertMessages &&
     !isSealing
   }
 
@@ -286,10 +287,23 @@ struct MessagesComposeView: View {
       }
 
       let createdMessage = try await sender.create(upload: upload, imageAttachment: imageAttachment)
-      await MainActor.run {
-        self.createdMessage = createdMessage
-        statusText = "Message sealed. Insert it into the conversation to send."
-        isSealing = false
+
+      do {
+        try await context.insertSealedMessage(
+          createdMessage,
+          includePINMessage: sharePINSeparately,
+          dismissAfterInsert: true
+        )
+        await MainActor.run {
+          statusText = sharePINSeparately ? "Sealed message and PIN inserted." : "Sealed message inserted."
+          isSealing = false
+        }
+      } catch {
+        await MainActor.run {
+          self.createdMessage = createdMessage
+          statusText = "Message sealed, but it could not be inserted automatically."
+          isSealing = false
+        }
       }
     } catch {
       await MainActor.run {
@@ -304,7 +318,11 @@ struct MessagesComposeView: View {
     statusText = nil
 
     do {
-      try await context.insertSealedMessage(createdMessage, includePINMessage: sharePINSeparately)
+      try await context.insertSealedMessage(
+        createdMessage,
+        includePINMessage: sharePINSeparately,
+        dismissAfterInsert: true
+      )
       await MainActor.run {
         statusText = sharePINSeparately ? "Sealed message and PIN inserted." : "Sealed message inserted."
         isInserting = false
@@ -322,7 +340,7 @@ struct MessagesComposeView: View {
     statusText = nil
 
     do {
-      try await context.insertPIN(pin)
+      try await context.insertPIN(pin, dismissAfterInsert: true)
       await MainActor.run {
         statusText = "PIN inserted."
         isInserting = false

@@ -7,6 +7,7 @@ final class MessagesViewController: MSMessagesAppViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    composeContext.messagesViewController = self
     installComposeView()
   }
 
@@ -40,6 +41,7 @@ final class MessagesViewController: MSMessagesAppViewController {
 @MainActor
 final class MessagesComposeContext: ObservableObject {
   @Published private(set) var canInsertMessages = false
+  weak var messagesViewController: MSMessagesAppViewController?
 
   weak var activeConversation: MSConversation? {
     didSet {
@@ -47,7 +49,11 @@ final class MessagesComposeContext: ObservableObject {
     }
   }
 
-  func insertSealedMessage(_ createdMessage: CreatedSealedMessage, includePINMessage: Bool) async throws {
+  func insertSealedMessage(
+    _ createdMessage: CreatedSealedMessage,
+    includePINMessage: Bool,
+    dismissAfterInsert: Bool = false
+  ) async throws {
     guard let activeConversation else {
       throw MessagesComposeContextError.noActiveConversation
     }
@@ -66,13 +72,21 @@ final class MessagesComposeContext: ObservableObject {
     if includePINMessage {
       try await insertText("PIN: \(createdMessage.pin)", into: activeConversation)
     }
+
+    if dismissAfterInsert {
+      messagesViewController?.dismiss()
+    }
   }
 
-  func insertPIN(_ pin: String) async throws {
+  func insertPIN(_ pin: String, dismissAfterInsert: Bool = false) async throws {
     guard let activeConversation else {
       throw MessagesComposeContextError.noActiveConversation
     }
     try await insertText("PIN: \(pin)", into: activeConversation)
+
+    if dismissAfterInsert {
+      messagesViewController?.dismiss()
+    }
   }
 
   private func insert(_ message: MSMessage, into conversation: MSConversation) async throws {
