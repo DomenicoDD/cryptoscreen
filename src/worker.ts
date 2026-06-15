@@ -45,6 +45,7 @@ type CreateMessageBody = {
 
 type ConsumeMessageBody = {
   pinProof: string;
+  clientOptIn: boolean;
 };
 
 type ExpireMessageBody = {
@@ -91,6 +92,7 @@ type ConsumeMessageRow = {
 
 type MessageStatusRow = {
   status: (typeof messageStatuses)[number];
+  interactionStatusShared: boolean;
   textConsumed: boolean;
   imageAttachmentAttached: boolean;
   imageAttachmentConsumed: boolean;
@@ -480,7 +482,7 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
   const row = await consumeMessageRow(env, messageID, pinVerifierHex);
 
   if (row.status !== "opened") {
-    await updateAuditForConsumeResult(env, messageID, row);
+    await updateAuditForConsumeResult(env, messageID, row, body.clientOptIn);
 
     return jsonResponse({
       status: row.status,
@@ -496,7 +498,7 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
   const attachment = row.retained
     ? null
     : await createReadSessionForAttachment(env, messageID, row);
-  await updateAuditForConsumeResult(env, messageID, row);
+  await updateAuditForConsumeResult(env, messageID, row, body.clientOptIn);
 
   return jsonResponse({
     status: row.status,
@@ -511,7 +513,7 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
   });
 }
 
-async function updateAuditForConsumeResult(env: Env, messageID: string, row: ConsumeMessageRow): Promise<void> {
+async function updateAuditForConsumeResult(env: Env, messageID: string, row: ConsumeMessageRow, sharesInteractionStatus: boolean): Promise<void> {
   const sql = neon(env.DATABASE_URL);
 
   if (row.status === "opened") {
@@ -519,6 +521,10 @@ async function updateAuditForConsumeResult(env: Env, messageID: string, row: Con
       update cryptoscreen.sealed_message_delivery_audit
       set
         text_consumed_at = coalesce(text_consumed_at, now()),
+        interaction_status_opted_in_at = case
+          when ${sharesInteractionStatus} then coalesce(interaction_status_opted_in_at, now())
+          else interaction_status_opted_in_at
+        end,
         has_image_attachment = has_image_attachment or ${row.attachment_id !== null},
         updated_at = now()
       where message_id = ${messageID}::uuid
@@ -770,6 +776,7 @@ async function recordReadSessionEvent(request: Request, env: Env, readSessionID:
       update cryptoscreen.sealed_message_delivery_audit
       set
         screenshot_detected_at = coalesce(screenshot_detected_at, ${body.timestamp}::timestamptz, now()),
+        interaction_status_opted_in_at = coalesce(interaction_status_opted_in_at, ${body.timestamp}::timestamptz, now()),
         updated_at = now()
       where message_id in (select message_id from target_session)
       returning message_id
@@ -797,6 +804,7 @@ async function recordMessageEvent(request: Request, env: Env, messageID: string)
     update cryptoscreen.sealed_message_delivery_audit
     set
       screenshot_detected_at = coalesce(screenshot_detected_at, ${body.timestamp}::timestamptz, now()),
+      interaction_status_opted_in_at = coalesce(interaction_status_opted_in_at, ${body.timestamp}::timestamptz, now()),
       updated_at = now()
     where message_id = ${messageID}::uuid
       and text_consumed_at is not null
@@ -932,10 +940,23 @@ async function messageStatus(env: Env, messageID: string): Promise<Response> {
         when audit.expired_at is not null or exists (select 1 from deleted_expired) then 'expired'
         else 'consumed'
       end as status,
-      coalesce(audit.text_consumed_at is not null, false) as text_consumed,
-      coalesce(audit.has_image_attachment, false) as image_attachment_attached,
-      coalesce(audit.image_consumed_at is not null, false) as image_attachment_consumed,
-      coalesce(audit.screenshot_detected_at is not null, false) as screenshot_detected
+      coalesce(audit.interaction_status_opted_in_at is not null, false) as interaction_status_shared,
+      case
+        when coalesce(audit.interaction_status_opted_in_at is not null, false) then coalesce(audit.text_consumed_at is not null, false)
+        else false
+      end as text_consumed,
+      case
+        when coalesce(audit.interaction_status_opted_in_at is not null, false) then coalesce(audit.has_image_attachment, false)
+        else false
+      end as image_attachment_attached,
+      case
+        when coalesce(audit.interaction_status_opted_in_at is not null, false) then coalesce(audit.image_consumed_at is not null, false)
+        else false
+      end as image_attachment_consumed,
+      case
+        when coalesce(audit.interaction_status_opted_in_at is not null, false) then coalesce(audit.screenshot_detected_at is not null, false)
+        else false
+      end as screenshot_detected
     from (select 1) singleton
     left join cryptoscreen.sealed_message_delivery_audit audit
       on audit.message_id = ${messageID}::uuid
@@ -1017,7 +1038,8 @@ function parseConsumeBody(value: unknown): ConsumeMessageBody {
   const body = expectRecord(value);
 
   return {
-    pinProof: expectString(body.pinProof, "pinProof")
+    pinProof: expectString(body.pinProof, "pinProof"),
+    clientOptIn: body.clientOptIn === true
   };
 }
 
@@ -1068,7 +1090,7 @@ function parseReadSessionEventBody(value: unknown): ReadSessionEventBody {
   }
 
   if (body.clientOptIn !== true) {
-    throw new HttpError(403, "event_reporting_opt_in_required", "Screenshot reporting requires explicit client opt-in.");
+    throw new HttpError(403, "event_reporting_opt_in_required", "Interaction status reporting requires explicit client opt-in.");
   }
 
   const timestamp = expectString(body.timestamp, "timestamp").trim();
@@ -1405,6 +1427,7 @@ function parseMessageStatusRow(value: unknown): MessageStatusRow {
 
   return {
     status: status as MessageStatusRow["status"],
+    interactionStatusShared: expectDatabaseBoolean(row.interaction_status_shared, "interaction_status_shared"),
     textConsumed: expectDatabaseBoolean(row.text_consumed, "text_consumed"),
     imageAttachmentAttached: expectDatabaseBoolean(row.image_attachment_attached, "image_attachment_attached"),
     imageAttachmentConsumed: expectDatabaseBoolean(row.image_attachment_consumed, "image_attachment_consumed"),
@@ -1736,8 +1759,8 @@ function privacyPage(env: Env): string {
         <h2>Status data and telemetry</h2>
         <p>cryptoscreen does not use ad SDKs, tracking SDKs, third-party analytics SDKs, or contact upload. There is no account profile.</p>
         <p>One-time links necessarily reveal some delivery state. If a link no longer opens, the sender or recipient can infer that the message was already opened, expired, destroyed after wrong PIN attempts, or manually expired by the sender. This is part of enforcing one-time reads and does not require telemetry opt-in.</p>
-        <p>To power the sender's local sent-message list, the service keeps minimal delivery-status metadata for a message id: whether the text was consumed, whether an encrypted image attachment existed, whether that image was consumed, whether the row expired or was destroyed, and whether a screenshot event was reported. This status metadata does not include plaintext, image plaintext, PINs, link secrets, sender identity, recipient identity, or contact data. Delivery-status metadata is deleted by scheduled cleanup after it has been inactive for about ${LINK_RETENTION_DAYS} days.</p>
-        <p>Screenshot reporting is opt-in in the app's Privacy settings. If it is off, the app still clears the visible reader when iOS reports a screenshot, but it does not send a screenshot report to the server. If it is on, the app sends only a generic screenshot event and timestamp for that message. Screenshot detection is best-effort: iOS reports normal screenshots after capture, modified clients can omit reporting, and external cameras cannot be detected.</p>
+        <p>To support one-time deletion and the optional sent-message list, the service keeps minimal delivery-status metadata for a message id: whether the text was consumed, whether an encrypted image attachment existed, whether that image was consumed, whether the row expired or was destroyed, and whether a screenshot event was reported. This status metadata does not include plaintext, image plaintext, PINs, link secrets, sender identity, recipient identity, or contact data. Delivery-status metadata is deleted by scheduled cleanup after it has been inactive for about ${LINK_RETENTION_DAYS} days.</p>
+        <p>Interaction status sharing is opt-in in the app's Privacy settings and works reciprocally. If it is off, the app does not send optional read or screenshot status and does not fetch or show detailed interaction status for messages you sent. If it is on, you can see detailed interaction status only when the reader also shared interaction status from their app. Screenshot reports contain only a generic screenshot event and timestamp for that message. Screenshot detection is best-effort: iOS reports normal screenshots after capture, modified clients can omit reporting, and external cameras cannot be detected.</p>
         <p>The service also keeps an aggregate count of how many sealed messages have been shared. That counter does not include message content, recipients, senders, or link secrets.</p>
         <p>If you send feedback from inside the app, the service processes the rating, feedback text, app version/build, platform/device information, and timestamp to deliver that support request to the maintainer.</p>
         <h2>TestFlight beta data</h2>
@@ -1793,7 +1816,7 @@ function supportPage(env: Env): string {
           Follow development on <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a> or contact the maintainer on <a href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>.
         </p>
         <h2>Safety note</h2>
-        <p>Screenshot and screen recording protections are best-effort iOS protections. They reduce accidental exposure but cannot guarantee protection against external cameras or compromised devices. Screenshot reporting to the sender is opt-in in the app's Privacy settings.</p>
+        <p>Screenshot and screen recording protections are best-effort iOS protections. They reduce accidental exposure but cannot guarantee protection against external cameras or compromised devices. Interaction status sharing, including optional screenshot reports to the sender, is opt-in in the app's Privacy settings and works reciprocally.</p>
         <h2>TestFlight note</h2>
         <p>Apple's TestFlight warning is standard for beta apps. TestFlight can share crash logs, beta usage information, and submitted beta feedback with the app provider. cryptoscreen does not add ad tracking SDKs or third-party analytics SDKs.</p>
       </section>

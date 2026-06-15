@@ -11,7 +11,7 @@ private let maxFeedbackCharacterCount = 2_000
 private let proImageAttachmentsEnabled = true
 private let demoCardImageAssetName = "DemoCard"
 private let sentMessagesStorageKey = "cryptoscreen.sentMessages"
-private let screenshotReportingOptInKey = "cryptoscreen.reporting.screenshotEvents"
+private let interactionStatusSharingOptInKey = "cryptoscreen.reporting.screenshotEvents"
 private let onboardingReaderMessage = """
 This is a cryptoscreen message.
 
@@ -108,6 +108,7 @@ struct SentMessageRecord: Identifiable, Codable, Equatable {
   let createdAt: Date
   let characterCount: Int
   var hasImageAttachment: Bool
+  var interactionStatusShared: Bool
   var textConsumed: Bool
   var imageConsumed: Bool
   var screenshotDetected: Bool
@@ -124,6 +125,7 @@ struct SentMessageRecord: Identifiable, Codable, Equatable {
     createdAt: Date,
     characterCount: Int,
     hasImageAttachment: Bool = false,
+    interactionStatusShared: Bool = false,
     textConsumed: Bool = false,
     imageConsumed: Bool = false,
     screenshotDetected: Bool = false,
@@ -135,6 +137,7 @@ struct SentMessageRecord: Identifiable, Codable, Equatable {
     self.createdAt = createdAt
     self.characterCount = characterCount
     self.hasImageAttachment = hasImageAttachment
+    self.interactionStatusShared = interactionStatusShared
     self.textConsumed = textConsumed
     self.imageConsumed = imageConsumed
     self.screenshotDetected = screenshotDetected
@@ -148,6 +151,7 @@ struct SentMessageRecord: Identifiable, Codable, Equatable {
     case createdAt
     case characterCount
     case hasImageAttachment
+    case interactionStatusShared
     case textConsumed
     case imageConsumed
     case screenshotDetected
@@ -162,6 +166,7 @@ struct SentMessageRecord: Identifiable, Codable, Equatable {
     createdAt = try container.decode(Date.self, forKey: .createdAt)
     characterCount = try container.decode(Int.self, forKey: .characterCount)
     hasImageAttachment = try container.decodeIfPresent(Bool.self, forKey: .hasImageAttachment) ?? false
+    interactionStatusShared = try container.decodeIfPresent(Bool.self, forKey: .interactionStatusShared) ?? false
     textConsumed = try container.decodeIfPresent(Bool.self, forKey: .textConsumed) ?? false
     imageConsumed = try container.decodeIfPresent(Bool.self, forKey: .imageConsumed) ?? false
     screenshotDetected = try container.decodeIfPresent(Bool.self, forKey: .screenshotDetected) ?? false
@@ -224,16 +229,16 @@ final class SealedMessageStore: ObservableObject {
     return createdMessage
   }
 
-  func consume(link: String, pin: String) async -> MessageOpenResult {
-    let result = await api.consume(link: link, pin: pin)
+  func consume(link: String, pin: String, sharesInteractionStatus: Bool) async -> MessageOpenResult {
+    let result = await api.consume(link: link, pin: pin, sharesInteractionStatus: sharesInteractionStatus)
 
     switch result {
     case .opened(let openedMessage):
       if !openedMessage.retained {
-        markLocalMessageConsumed(link: link, result: result)
+        markLocalMessageConsumed(link: link, result: result, sharesInteractionStatus: sharesInteractionStatus)
       }
     case .destroyed, .expired:
-      markLocalMessageConsumed(link: link, result: result)
+      markLocalMessageConsumed(link: link, result: result, sharesInteractionStatus: sharesInteractionStatus)
     default:
       break
     }
@@ -255,7 +260,11 @@ final class SealedMessageStore: ObservableObject {
     persistSentMessages()
   }
 
-  func refreshSentMessageStatuses() async {
+  func refreshSentMessageStatuses(allowsInteractionStatus: Bool) async {
+    guard allowsInteractionStatus else {
+      return
+    }
+
     for message in sentMessages where message.status == .active || message.status == .consumed {
       do {
         let remoteStatus = try await api.status(messageID: message.id)
@@ -283,25 +292,26 @@ final class SealedMessageStore: ObservableObject {
     )
   }
 
-  private func markLocalMessageConsumed(link: String, result: MessageOpenResult) {
+  private func markLocalMessageConsumed(link: String, result: MessageOpenResult, sharesInteractionStatus: Bool) {
     guard let messageID = SealedMessageCrypto.request(from: link)?.messageID else {
       return
     }
 
     switch result {
     case .expired:
-      updateSentMessageStatus(id: messageID, status: .expired, textConsumed: false, imageConsumed: false)
+      updateSentMessageStatus(id: messageID, status: .expired, interactionStatusShared: sharesInteractionStatus, textConsumed: false, imageConsumed: false)
     case .opened(let openedMessage):
       updateSentMessageStatus(
         id: messageID,
         status: .consumed,
+        interactionStatusShared: sharesInteractionStatus,
         textConsumed: true,
         imageConsumed: openedMessage.attachment != nil
       )
     case .destroyed:
-      updateSentMessageStatus(id: messageID, status: .destroyed, textConsumed: false, imageConsumed: false)
+      updateSentMessageStatus(id: messageID, status: .destroyed, interactionStatusShared: sharesInteractionStatus, textConsumed: false, imageConsumed: false)
     default:
-      updateSentMessageStatus(id: messageID, status: .consumed, textConsumed: true, imageConsumed: false)
+      updateSentMessageStatus(id: messageID, status: .consumed, interactionStatusShared: sharesInteractionStatus, textConsumed: true, imageConsumed: false)
     }
   }
 
@@ -311,12 +321,15 @@ final class SealedMessageStore: ObservableObject {
     persistSentMessages()
   }
 
-  private func updateSentMessageStatus(id: UUID, status: SentMessageStatus, textConsumed: Bool? = nil, imageConsumed: Bool? = nil) {
+  private func updateSentMessageStatus(id: UUID, status: SentMessageStatus, interactionStatusShared: Bool? = nil, textConsumed: Bool? = nil, imageConsumed: Bool? = nil) {
     guard let index = sentMessages.firstIndex(where: { $0.id == id }) else {
       return
     }
 
     sentMessages[index].status = status
+    if let interactionStatusShared {
+      sentMessages[index].interactionStatusShared = interactionStatusShared
+    }
     if let textConsumed {
       sentMessages[index].textConsumed = textConsumed
     }
@@ -332,6 +345,7 @@ final class SealedMessageStore: ObservableObject {
     }
 
     sentMessages[index].status = SentMessageStatus(remoteStatus.status)
+    sentMessages[index].interactionStatusShared = remoteStatus.interactionStatusShared
     sentMessages[index].hasImageAttachment = sentMessages[index].hasImageAttachment || remoteStatus.imageAttachmentAttached
     sentMessages[index].textConsumed = remoteStatus.textConsumed
     sentMessages[index].imageConsumed = remoteStatus.imageAttachmentConsumed
@@ -565,7 +579,7 @@ private struct HeaderView: View {
 
 private struct PrivacySettingsView: View {
   @Environment(\.dismiss) private var dismiss
-  @AppStorage(screenshotReportingOptInKey) private var reportsScreenshotEvents = false
+  @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
 
   var body: some View {
     ZStack {
@@ -579,7 +593,7 @@ private struct PrivacySettingsView: View {
               .font(.system(size: 24, weight: .semibold, design: .rounded))
               .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
 
-            Text("Telemetry stays minimal and visible.")
+            Text("Read receipts are reciprocal.")
               .font(.system(size: 13, weight: .medium, design: .rounded))
               .foregroundStyle(Color.white.opacity(0.56))
           }
@@ -601,13 +615,13 @@ private struct PrivacySettingsView: View {
         }
 
         VStack(alignment: .leading, spacing: 12) {
-          Toggle(isOn: $reportsScreenshotEvents) {
+          Toggle(isOn: $sharesInteractionStatus) {
             VStack(alignment: .leading, spacing: 5) {
-              Text("Report screenshots to sender")
+              Text("Share interaction status")
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
 
-              Text("Off by default. When enabled, if iOS reports a screenshot while you read a sealed message, cryptoscreen sends only a screenshot event and timestamp for that message. It never sends plaintext, image bytes, PINs, contacts, or the link secret.")
+              Text("Off by default. When enabled, your app can share limited read and screenshot status while you read sealed messages. You can see detailed interaction status on messages you sent only when the reader also shared it.")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.58))
                 .fixedSize(horizontal: false, vertical: true)
@@ -615,7 +629,7 @@ private struct PrivacySettingsView: View {
           }
           .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
 
-          Text("One-time links necessarily reveal some status: if a link no longer opens, someone with the link can infer it was opened, expired, destroyed, or manually expired. Screenshot reporting is separate and remains off unless you enable it.")
+          Text("One-time links still reveal basic availability: if a link no longer opens, someone with the link can infer it was opened, expired, destroyed, or manually expired. Interaction status is separate and works both ways only when you enable it.")
             .font(.system(size: 12, weight: .medium, design: .rounded))
             .foregroundStyle(Color.white.opacity(0.48))
             .fixedSize(horizontal: false, vertical: true)
@@ -635,6 +649,7 @@ private struct PrivacySettingsView: View {
 private struct SentMessagesView: View {
   @Environment(\.dismiss) private var dismiss
   @ObservedObject var store: SealedMessageStore
+  @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
   @State private var showsPins = false
   @State private var copiedMessageID: UUID?
   @State private var expiringMessageID: UUID?
@@ -708,6 +723,7 @@ private struct SentMessagesView: View {
                 SentMessageRow(
                   message: message,
                   showsPin: showsPins,
+                  showsInteractionStatus: sharesInteractionStatus,
                   didCopy: copiedMessageID == message.id,
                   isExpiring: expiringMessageID == message.id,
                   onCopy: {
@@ -742,8 +758,8 @@ private struct SentMessagesView: View {
       .padding(.horizontal, 20)
       .padding(.top, 22)
     }
-    .task {
-      await store.refreshSentMessageStatuses()
+    .task(id: sharesInteractionStatus) {
+      await store.refreshSentMessageStatuses(allowsInteractionStatus: sharesInteractionStatus)
     }
   }
 
@@ -770,6 +786,7 @@ private struct SentMessagesView: View {
 private struct SentMessageRow: View {
   let message: SentMessageRecord
   let showsPin: Bool
+  let showsInteractionStatus: Bool
   let didCopy: Bool
   let isExpiring: Bool
   let onCopy: () -> Void
@@ -802,7 +819,18 @@ private struct SentMessageRow: View {
         SentMessageMetric(title: "PIN", value: showsPin ? message.pin : "••••••")
       }
 
-      SentMessageDeliveryGrid(message: message)
+      if showsInteractionStatus {
+        if message.status == .active || message.interactionStatusShared {
+          SentMessageDeliveryGrid(message: message)
+        } else {
+          InteractionStatusLockedView(
+            title: "Receiver did not share interaction status",
+            accessibilityLabel: "Interaction status hidden because the receiver has not shared it"
+          )
+        }
+      } else {
+        InteractionStatusLockedView()
+      }
 
       Text(message.link.absoluteString)
         .font(.system(size: 12, weight: .medium, design: .monospaced))
@@ -842,6 +870,29 @@ private struct SentMessageRow: View {
     .padding(14)
     .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+  }
+}
+
+private struct InteractionStatusLockedView: View {
+  var title = "Interaction status hidden"
+  var accessibilityLabel = "Interaction status hidden because sharing is off"
+
+  var body: some View {
+    Label {
+      Text(title)
+        .font(.system(size: 12, weight: .semibold, design: .rounded))
+        .lineLimit(1)
+        .minimumScaleFactor(0.82)
+    } icon: {
+      Image(systemName: "checkmark.message")
+        .font(.system(size: 12, weight: .bold))
+    }
+    .foregroundStyle(Color.white.opacity(0.42))
+    .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+    .padding(.horizontal, 12)
+    .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
+    .accessibilityLabel(accessibilityLabel)
   }
 }
 
@@ -1544,6 +1595,7 @@ private struct OpenSealedMessageView: View {
   let initialPIN: String
   let onOpen: (OpenedSealedMessage) -> Void
 
+  @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
   @State private var link = ""
   @State private var pin = ""
   @State private var status = "Paste or receive a cryptoscreen link, enter the PIN, then open it once."
@@ -1651,7 +1703,7 @@ private struct OpenSealedMessageView: View {
     }
 
     isOpening = true
-    let result = await store.consume(link: link, pin: pin)
+    let result = await store.consume(link: link, pin: pin, sharesInteractionStatus: sharesInteractionStatus)
     isOpening = false
 
     switch result {
@@ -1740,7 +1792,7 @@ private struct PinEntryField: View {
 private struct SecureReaderSessionView: View {
   @Environment(\.dismiss) private var dismiss
   @ObservedObject var store: SealedMessageStore
-  @AppStorage(screenshotReportingOptInKey) private var reportsScreenshotEvents = false
+  @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
   @State private var openedMessage: OpenedSealedMessage
   @State private var showsImage: Bool
 
@@ -1791,7 +1843,7 @@ private struct SecureReaderSessionView: View {
     dismiss()
     warningHaptic()
 
-    if reportsScreenshotEvents, let eventPath {
+    if sharesInteractionStatus, let eventPath {
       Task {
         await store.reportScreenshot(eventPath: eventPath)
       }

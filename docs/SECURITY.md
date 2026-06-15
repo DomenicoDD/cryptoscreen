@@ -278,7 +278,7 @@ Downloads encrypted attachment bytes through a short-lived read session. The Wor
 POST /api/read-sessions/{id}/events
 ```
 
-Stores opt-in best-effort reader events such as screenshot detection. Events must never contain message plaintext, image plaintext, PINs, proofs, or full links. The official app keeps screenshot reporting off by default in Privacy settings.
+Stores opt-in best-effort reader events such as screenshot detection. Events must never contain message plaintext, image plaintext, PINs, proofs, or full links. The official app keeps reciprocal interaction status sharing off by default in Privacy settings.
 
 The Worker also serves:
 
@@ -323,9 +323,9 @@ The app should:
 - Black out the interface when screen recording or mirroring is active.
 - Black out app switcher snapshots when the scene leaves active state.
 - React to screenshot notification by redacting immediately after detection and destroying the visible reader session.
-- Report screenshot events through the read-session event endpoint only when the reader has opted in and a cooperative client has an active attachment read session.
+- Report screenshot events through the read-session event endpoint only when the reader has enabled interaction status sharing and a cooperative client has an active attachment read session.
 
-Screenshot prevention is best-effort. iOS does not provide a supported way to guarantee that every normal screenshot is black before capture. Screenshot-triggered local destruction happens after iOS reports the screenshot. Screenshot event reporting is opt-in and best-effort because modified open-source clients can omit the event and external cameras cannot be detected.
+Screenshot prevention is best-effort. iOS does not provide a supported way to guarantee that every normal screenshot is black before capture. Screenshot-triggered local destruction happens after iOS reports the screenshot. Interaction status sharing is opt-in and best-effort because modified open-source clients can omit events and external cameras cannot be detected.
 
 ## Data Retention
 

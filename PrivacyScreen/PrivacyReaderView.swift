@@ -279,6 +279,8 @@ final class RevealTouchCaptureUIView: UIView {
   private var activeTouchIDs: Set<ObjectIdentifier> = []
   private var isActive = false
   private let touchSlop: CGFloat = 16
+  private let releaseDelay: TimeInterval = 0.28
+  private var pendingRelease: DispatchWorkItem?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -312,8 +314,10 @@ final class RevealTouchCaptureUIView: UIView {
   }
 
   func reset() {
+    pendingRelease?.cancel()
+    pendingRelease = nil
     activeTouchIDs.removeAll()
-    publishActiveState()
+    publishActiveState(delaysRelease: false)
   }
 
   private func updateTrackedTouches(_ touches: Set<UITouch>) {
@@ -340,15 +344,41 @@ final class RevealTouchCaptureUIView: UIView {
     publishActiveState()
   }
 
-  private func publishActiveState() {
+  private func publishActiveState(delaysRelease: Bool = true) {
     let nextValue = !activeTouchIDs.isEmpty
 
     guard isActive != nextValue else {
       return
     }
 
-    isActive = nextValue
-    onActiveChanged?(nextValue)
+    if nextValue {
+      pendingRelease?.cancel()
+      pendingRelease = nil
+      isActive = true
+      onActiveChanged?(true)
+      return
+    }
+
+    pendingRelease?.cancel()
+
+    guard delaysRelease else {
+      isActive = false
+      onActiveChanged?(false)
+      return
+    }
+
+    let release = DispatchWorkItem { [weak self] in
+      guard let self, self.activeTouchIDs.isEmpty, self.isActive else {
+        return
+      }
+
+      self.isActive = false
+      self.pendingRelease = nil
+      self.onActiveChanged?(false)
+    }
+
+    pendingRelease = release
+    DispatchQueue.main.asyncAfter(deadline: .now() + releaseDelay, execute: release)
   }
 }
 

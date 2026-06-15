@@ -40,7 +40,7 @@ struct SealedMessageAPI {
     )
   }
 
-  func consume(link: String, pin: String) async -> MessageOpenResult {
+  func consume(link: String, pin: String, sharesInteractionStatus: Bool) async -> MessageOpenResult {
     guard SealedMessageCrypto.normalizePIN(pin).count == SealedMessageCrypto.pinLength else {
       return .invalidPin
     }
@@ -57,7 +57,10 @@ struct SealedMessageAPI {
     }
 
     do {
-      let body = ConsumeMessageRequest(pinProof: pinProof.base64URLEncodedString())
+      let body = ConsumeMessageRequest(
+        pinProof: pinProof.base64URLEncodedString(),
+        clientOptIn: sharesInteractionStatus
+      )
       let response: ConsumeMessageResponse = try await send(
         path: "/api/messages/\(request.messageID.uuidString.lowercased())/consume",
         method: "POST",
@@ -125,6 +128,7 @@ struct SealedMessageAPI {
 
     return SealedMessageRemoteDeliveryStatus(
       status: SealedMessageRemoteStatus(rawValue: response.status) ?? .consumed,
+      interactionStatusShared: response.interactionStatusShared ?? false,
       textConsumed: response.textConsumed ?? false,
       imageAttachmentAttached: response.imageAttachmentAttached ?? false,
       imageAttachmentConsumed: response.imageAttachmentConsumed ?? false,
@@ -146,6 +150,7 @@ struct SealedMessageAPI {
 
     return SealedMessageRemoteDeliveryStatus(
       status: SealedMessageRemoteStatus(rawValue: response.status) ?? .expired,
+      interactionStatusShared: response.interactionStatusShared ?? false,
       textConsumed: response.textConsumed ?? false,
       imageAttachmentAttached: response.imageAttachmentAttached ?? false,
       imageAttachmentConsumed: response.imageAttachmentConsumed ?? false,
@@ -319,6 +324,7 @@ enum SealedMessageRemoteStatus: String, Codable {
 
 struct SealedMessageRemoteDeliveryStatus: Equatable {
   let status: SealedMessageRemoteStatus
+  let interactionStatusShared: Bool
   let textConsumed: Bool
   let imageAttachmentAttached: Bool
   let imageAttachmentConsumed: Bool
@@ -343,6 +349,7 @@ private struct CreateMessageResponse: Decodable {
 
 private struct ConsumeMessageRequest: Encodable {
   let pinProof: String
+  let clientOptIn: Bool
 }
 
 private struct ExpireMessageRequest: Encodable {
@@ -374,6 +381,7 @@ private struct ConsumeAttachmentResponse: Decodable {
 
 private struct MessageStatusResponse: Decodable {
   let status: String
+  let interactionStatusShared: Bool?
   let textConsumed: Bool?
   let imageAttachmentAttached: Bool?
   let imageAttachmentConsumed: Bool?

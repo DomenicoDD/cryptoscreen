@@ -136,6 +136,7 @@ create table if not exists cryptoscreen.sealed_message_delivery_audit (
   message_id uuid primary key,
   has_image_attachment boolean not null default false,
   text_consumed_at timestamptz,
+  interaction_status_opted_in_at timestamptz,
   image_consumed_at timestamptz,
   screenshot_detected_at timestamptz,
   expired_at timestamptz,
@@ -143,6 +144,9 @@ create table if not exists cryptoscreen.sealed_message_delivery_audit (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table cryptoscreen.sealed_message_delivery_audit
+  add column if not exists interaction_status_opted_in_at timestamptz;
 
 create index if not exists sealed_message_delivery_audit_updated_at_idx
   on cryptoscreen.sealed_message_delivery_audit (updated_at);
@@ -398,6 +402,9 @@ comment on table cryptoscreen.sealed_message_read_sessions is
 
 comment on table cryptoscreen.sealed_message_read_session_events is
   'Best-effort reader events such as iOS screenshot detection. Events contain no message plaintext or image plaintext.';
+
+comment on column cryptoscreen.sealed_message_delivery_audit.interaction_status_opted_in_at is
+  'Set only when the reader opted into reciprocal interaction status sharing for this read.';
 
 comment on function cryptoscreen.consume_sealed_message(uuid, bytea) is
   'Atomically consumes one PIN attempt. Correct PIN returns ciphertext plus encrypted attachment metadata and deletes normal rows; third wrong PIN deletes normal rows. Retained demo/review rows are reusable.';
