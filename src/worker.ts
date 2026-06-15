@@ -1735,6 +1735,7 @@ function privacyPage(env: Env): string {
         <p>After a successful read with an image attachment, the app downloads the encrypted image bytes through a short-lived one-time read session. The R2 object is deleted after that one-time download. Expired attachment objects and read sessions are deleted by scheduled cleanup.</p>
         <h2>Status data and telemetry</h2>
         <p>cryptoscreen does not use ad SDKs, tracking SDKs, third-party analytics SDKs, or contact upload. There is no account profile.</p>
+        <p>One-time links necessarily reveal some delivery state. If a link no longer opens, the sender or recipient can infer that the message was already opened, expired, destroyed after wrong PIN attempts, or manually expired by the sender. This is part of enforcing one-time reads and does not require telemetry opt-in.</p>
         <p>To power the sender's local sent-message list, the service keeps minimal delivery-status metadata for a message id: whether the text was consumed, whether an encrypted image attachment existed, whether that image was consumed, whether the row expired or was destroyed, and whether a screenshot event was reported. This status metadata does not include plaintext, image plaintext, PINs, link secrets, sender identity, recipient identity, or contact data. Delivery-status metadata is deleted by scheduled cleanup after it has been inactive for about ${LINK_RETENTION_DAYS} days.</p>
         <p>Screenshot reporting is opt-in in the app's Privacy settings. If it is off, the app still clears the visible reader when iOS reports a screenshot, but it does not send a screenshot report to the server. If it is on, the app sends only a generic screenshot event and timestamp for that message. Screenshot detection is best-effort: iOS reports normal screenshots after capture, modified clients can omit reporting, and external cameras cannot be detected.</p>
         <p>The service also keeps an aggregate count of how many sealed messages have been shared. That counter does not include message content, recipients, senders, or link secrets.</p>
@@ -1762,7 +1763,7 @@ function termsPage(env: Env): string {
         <h2>Security model</h2>
         <p>The service is designed so message plaintext, raw image bytes, PINs, and decryption keys are not available to the server. The app cannot protect content after a recipient has legitimately viewed it, and it cannot prevent external cameras, compromised devices, or modified clients.</p>
         <h2>Availability and deletion</h2>
-        <p>Normal user messages are intended to be available for one successful read, destroyed after the third wrong PIN attempt, or expired after ${LINK_RETENTION_DAYS} days if unopened. Deleted or expired messages cannot be recovered by cryptoscreen.</p>
+        <p>Normal user messages are intended to be available for one successful read, destroyed after the third wrong PIN attempt, manually expired by the sender, or expired after ${LINK_RETENTION_DAYS} days if unopened. Deleted or expired messages cannot be recovered by cryptoscreen. Because unavailable links stop opening, people with the link may be able to infer that one of those events happened.</p>
         <h2>Beta status</h2>
         <p>The service may change during beta. Do not use cryptoscreen as the only copy of important information.</p>
         <h2>Privacy</h2>

@@ -612,7 +612,7 @@ private struct PrivacySettingsView: View {
           }
           .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
 
-          Text("One-time message status is still processed by the server to enforce deletion, expiry, and wrong-PIN destruction.")
+          Text("One-time links necessarily reveal some status: if a link no longer opens, someone with the link can infer it was opened, expired, destroyed, or manually expired. Screenshot reporting is separate and remains off unless you enable it.")
             .font(.system(size: 12, weight: .medium, design: .rounded))
             .foregroundStyle(Color.white.opacity(0.48))
             .fixedSize(horizontal: false, vertical: true)

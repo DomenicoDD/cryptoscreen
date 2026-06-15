@@ -260,6 +260,8 @@ Consumes one attempt. Request contains the client-generated PIN proof. Response 
 
 For service-owned retained demo/review rows, `opened` returns encrypted payload without deleting the row, and wrong PIN attempts do not mutate the row. The response includes a `retained` boolean so clients can avoid displaying normal deletion copy for the demo path.
 
+One-time links necessarily expose some passive delivery state: when a link stops opening, someone with the link can infer that the row was opened, expired, destroyed after wrong PIN attempts, or manually expired by the sender. This is separate from optional screenshot event reporting and is inherent to enforcing one-time reads.
+
 ```text
 PUT /api/messages/{id}/attachment
 ```
