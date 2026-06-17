@@ -1655,7 +1655,6 @@ async function homePage(env: Env): Promise<string> {
           </div>
           <div class="actions">
             <a class="button primary" href="${escapeAttribute(links.testFlightUrl)}" rel="noreferrer">Now in open beta</a>
-            <a class="button" href="${escapeAttribute(links.appStoreUrl)}">Open on App Store</a>
             <a class="button" href="/support">Support</a>
             <a class="button ghost" href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
             <a class="button ghost" href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
@@ -1732,14 +1731,11 @@ function messagePage(url: URL, env: Env): string {
           <a class="button" href="/support">Support</a>
         </div>
         <p class="hint">
-          On iPhone, this button uses the same universal link. If the app is installed, iOS opens the app. If not, Safari can offer the App Clip through the banner.
-        </p>
-        <p class="browser-warning" data-safari-warning hidden>
-          Open this link in Safari to see the App Clip prompt. Other iOS browsers may only show this web fallback.
+          On iPhone, this button uses the same universal link. If the app is installed, iOS opens the app. Otherwise, join the TestFlight beta.
         </p>
       </section>
     `,
-    messageUrl
+    true
   );
 }
 
@@ -1839,7 +1835,7 @@ function notFoundPage(env: Env): string {
   );
 }
 
-function pageShell(title: string, env: Env, content: string, appArgument?: string, bodyScript = ""): string {
+function pageShell(title: string, env: Env, content: string, preserveFragment = false, bodyScript = ""): string {
   const escapedTitle = escapeHtml(title);
   const description = "cryptoscreen seals one-time encrypted messages for private reading on iPhone.";
   const links = siteLinks(env);
@@ -1849,8 +1845,7 @@ function pageShell(title: string, env: Env, content: string, appArgument?: strin
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="apple-itunes-app" content="${escapeAttribute(smartBannerContent(env, appArgument))}">
-    ${appArgument ? fragmentForwardingScript() : ""}
+    ${preserveFragment ? fragmentForwardingScript() : ""}
     <meta name="description" content="${escapeAttribute(description)}">
     <meta name="theme-color" content="#08100b">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
@@ -2295,16 +2290,6 @@ function formatStatNumber(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-function smartBannerContent(env: Env, appArgument?: string): string {
-  const content = [`app-id=${env.APPLE_APP_ID}`, `app-clip-bundle-id=${env.APP_CLIP_BUNDLE_ID}`];
-
-  if (appArgument) {
-    content.push(`app-argument=${appArgument}`);
-  }
-
-  return content.join(", ");
-}
-
 function messageUrlWithoutFragment(url: URL, env: Env): string {
   const baseUrl = siteBaseUrl(env);
   return `${baseUrl.origin}${url.pathname}${url.search}`;
@@ -2365,31 +2350,15 @@ function homeStatsScript(): string {
 function fragmentForwardingScript(): string {
   return `<script>
 (() => {
-  const currentUrl = window.location.href;
-  const banner = document.querySelector('meta[name="apple-itunes-app"]');
-  if (banner) {
-    const parts = (banner.getAttribute("content") || "")
-      .split(",")
-      .map((part) => part.trim())
-      .filter((part) => part && !part.startsWith("app-argument="));
-    parts.push("app-argument=" + currentUrl);
-    banner.setAttribute("content", parts.join(", "));
-  }
   window.addEventListener("DOMContentLoaded", () => {
     const openMessage = document.querySelector("[data-open-message]");
-    if (openMessage) openMessage.href = currentUrl;
-    const userAgent = navigator.userAgent || "";
-    const isIOS = /iPad|iPhone|iPod/.test(userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    const isSafari = /Safari/.test(userAgent) && !/(CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo)/.test(userAgent);
-    const safariWarning = document.querySelector("[data-safari-warning]");
-    if (safariWarning && isIOS && !isSafari) safariWarning.hidden = false;
+    if (openMessage) openMessage.href = window.location.href;
   });
 })();
 </script>`;
 }
 
 function siteLinks(env: Env): {
-  appStoreUrl: string;
   githubUrl: string;
   supportEmail: string;
   testFlightUrl: string;
@@ -2398,7 +2367,6 @@ function siteLinks(env: Env): {
   const vars = env as unknown as Record<string, string | undefined>;
 
   return {
-    appStoreUrl: externalUrl(`https://apps.apple.com/app/id${env.APPLE_APP_ID}`),
     githubUrl: externalUrl(vars.GITHUB_REPOSITORY_URL ?? "https://github.com/DomenicoDD/cryptoscreen"),
     supportEmail: emailAddress(vars.SUPPORT_EMAIL ?? "domenico@cryptoscreen.app"),
     testFlightUrl: externalUrl(vars.TESTFLIGHT_PUBLIC_URL ?? "https://testflight.apple.com/join/ykqncUF5"),
