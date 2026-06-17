@@ -14,6 +14,7 @@ Delete this thread after the address arrives. If I miss the window, keep moving 
 struct PrivacyReaderView: View {
   let message: String
   let showsFontControls: Bool
+  let showsHandPlacementGuide: Bool
   let bottomChromeBottomPadding: CGFloat
   let onClose: (() -> Void)?
   let onRevealPerformed: () -> Void
@@ -26,13 +27,17 @@ struct PrivacyReaderView: View {
   @State private var pendingLineID: Int?
   @State private var revealDelayTask: Task<Void, Never>?
   @State private var hintDelayTask: Task<Void, Never>?
+  @State private var handPlacementGuideTask: Task<Void, Never>?
   @State private var showsTouchHint = false
+  @State private var showsHandPlacementGuideOverlay = false
+  @State private var didDismissHandPlacementGuide = false
   @State private var didReveal = false
   @State private var didScroll = false
 
   init(
     message: String = sampleMessage,
     showsFontControls: Bool = true,
+    showsHandPlacementGuide: Bool = false,
     bottomChromeBottomPadding: CGFloat = 16,
     onClose: (() -> Void)? = nil,
     onRevealPerformed: @escaping () -> Void = {},
@@ -40,6 +45,7 @@ struct PrivacyReaderView: View {
   ) {
     self.message = message
     self.showsFontControls = showsFontControls
+    self.showsHandPlacementGuide = showsHandPlacementGuide
     self.bottomChromeBottomPadding = bottomChromeBottomPadding
     self.onClose = onClose
     self.onRevealPerformed = onRevealPerformed
@@ -74,70 +80,81 @@ struct PrivacyReaderView: View {
       let bottomReadingPadding = max(proxy.safeAreaInsets.bottom + 180, proxy.size.height - revealZone.midY + 96)
 
       ZStack(alignment: .top) {
-        Color(red: 0.045, green: 0.047, blue: 0.043)
-          .ignoresSafeArea()
+        ZStack(alignment: .top) {
+          Color(red: 0.045, green: 0.047, blue: 0.043)
+            .ignoresSafeArea()
 
-        ScrollView(.vertical, showsIndicators: false) {
-          LazyVStack(alignment: .leading, spacing: fontSize * 0.32) {
-            ForEach(lines) { line in
-              ScrambleLineText(
-                text: line.text,
-                lineID: line.id,
-                fontSize: fontSize,
-                isRevealed: revealActive && revealedLineIDs.contains(line.id),
-                isActive: revealActive && activeLineID == line.id
-              )
-              .background(
-                GeometryReader { lineProxy in
-                  Color.clear.preference(
-                    key: LineFramePreferenceKey.self,
-                    value: [
-                      LineFrame(
-                        id: line.id,
-                        frame: lineProxy.frame(in: .named("readerScreen"))
-                      )
-                    ]
-                  )
-                }
-              )
+          ScrollView(.vertical, showsIndicators: false) {
+            LazyVStack(alignment: .leading, spacing: fontSize * 0.32) {
+              ForEach(lines) { line in
+                ScrambleLineText(
+                  text: line.text,
+                  lineID: line.id,
+                  fontSize: fontSize,
+                  isRevealed: revealActive && revealedLineIDs.contains(line.id),
+                  isActive: revealActive && activeLineID == line.id
+                )
+                .background(
+                  GeometryReader { lineProxy in
+                    Color.clear.preference(
+                      key: LineFramePreferenceKey.self,
+                      value: [
+                        LineFrame(
+                          id: line.id,
+                          frame: lineProxy.frame(in: .named("readerScreen"))
+                        )
+                      ]
+                    )
+                  }
+                )
+              }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, revealTop + 8)
+            .padding(.bottom, bottomReadingPadding)
           }
-          .padding(.horizontal, 20)
-          .padding(.top, revealTop + 8)
-          .padding(.bottom, bottomReadingPadding)
-        }
-        .onPreferenceChange(LineFramePreferenceKey.self) { frames in
-          updateRevealWindow(frames: frames, revealZone: revealZone)
-        }
+          .onPreferenceChange(LineFramePreferenceKey.self) { frames in
+            updateRevealWindow(frames: frames, revealZone: revealZone)
+          }
 
-        RevealTouchTestButton(
-          isRevealActive: revealActive,
-          showsHint: showsTouchHint,
-          frame: touchZone
-        )
+          RevealTouchTestButton(
+            isRevealActive: revealActive,
+            showsHint: showsTouchHint,
+            frame: touchZone
+          )
 
-        RevealTouchCaptureView { isActive in
-          proximitySensor.setScreenCoverActive(isActive)
+          RevealTouchCaptureView { isActive in
+            proximitySensor.setScreenCoverActive(isActive)
+          }
+          .frame(width: touchCaptureZone.width, height: touchCaptureZone.height)
+          .position(x: touchCaptureZone.midX, y: touchCaptureZone.midY)
+          .accessibilityHidden(true)
+
+          if didReveal && !didScroll {
+            ScrollTeachingPill()
+              .padding(.bottom, proxy.safeAreaInsets.bottom + 22)
+              .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+              .allowsHitTesting(false)
+              .transition(.opacity.combined(with: .move(edge: .bottom)))
+          }
+
+          ReaderChrome(
+            fontSize: $fontSize,
+            showsFontControls: showsFontControls,
+            onClose: onClose
+          )
+          .padding(.bottom, proxy.safeAreaInsets.bottom + bottomChromeBottomPadding)
+          .padding(.horizontal, 16)
         }
-        .frame(width: touchCaptureZone.width, height: touchCaptureZone.height)
-        .position(x: touchCaptureZone.midX, y: touchCaptureZone.midY)
-        .accessibilityHidden(true)
+        .blur(radius: showsHandPlacementGuideOverlay ? 4 : 0)
+        .animation(.easeOut(duration: 0.24), value: showsHandPlacementGuideOverlay)
+        .allowsHitTesting(!showsHandPlacementGuideOverlay)
 
-        if didReveal && !didScroll {
-          ScrollTeachingPill()
-            .padding(.bottom, proxy.safeAreaInsets.bottom + 22)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .allowsHitTesting(false)
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
+        if showsHandPlacementGuideOverlay {
+          HandPlacementGuideOverlay(onOK: dismissHandPlacementGuide)
+            .transition(.opacity)
+            .zIndex(10)
         }
-
-        ReaderChrome(
-          fontSize: $fontSize,
-          showsFontControls: showsFontControls,
-          onClose: onClose
-        )
-        .padding(.bottom, proxy.safeAreaInsets.bottom + bottomChromeBottomPadding)
-        .padding(.horizontal, 16)
       }
       .coordinateSpace(name: "readerScreen")
       .textSelection(.disabled)
@@ -150,6 +167,7 @@ struct PrivacyReaderView: View {
       .onAppear {
         UIApplication.shared.isIdleTimerDisabled = true
         proximitySensor.start()
+        presentHandPlacementGuideIfNeeded()
         hintDelayTask?.cancel()
         hintDelayTask = Task {
           try? await Task.sleep(nanoseconds: 500_000_000)
@@ -169,6 +187,7 @@ struct PrivacyReaderView: View {
         proximitySensor.stop()
         revealDelayTask?.cancel()
         hintDelayTask?.cancel()
+        handPlacementGuideTask?.cancel()
       }
       .onChange(of: revealActive) { _, isActive in
         if isActive, activeLineID != nil {
@@ -189,6 +208,41 @@ struct PrivacyReaderView: View {
 
     didReveal = true
     onRevealPerformed()
+  }
+
+  private func presentHandPlacementGuideIfNeeded() {
+    guard showsHandPlacementGuide, !didDismissHandPlacementGuide else {
+      return
+    }
+
+    withAnimation(.easeOut(duration: 0.24)) {
+      showsHandPlacementGuideOverlay = true
+    }
+
+    handPlacementGuideTask?.cancel()
+    handPlacementGuideTask = Task {
+      try? await Task.sleep(nanoseconds: 5_000_000_000)
+      guard !Task.isCancelled else {
+        return
+      }
+
+      await MainActor.run {
+        dismissHandPlacementGuide()
+      }
+    }
+  }
+
+  private func dismissHandPlacementGuide() {
+    guard showsHandPlacementGuideOverlay else {
+      return
+    }
+
+    handPlacementGuideTask?.cancel()
+    didDismissHandPlacementGuide = true
+
+    withAnimation(.easeOut(duration: 0.42)) {
+      showsHandPlacementGuideOverlay = false
+    }
   }
 
   private func markScrolledIfNeeded(_ translation: CGSize) {
@@ -252,6 +306,101 @@ struct PrivacyReaderView: View {
         }
       }
     }
+  }
+}
+
+private struct HandPlacementGuideOverlay: View {
+  let onOK: () -> Void
+
+  @State private var countdownProgress = 0.0
+
+  var body: some View {
+    GeometryReader { proxy in
+      let bottomPadding = max(proxy.safeAreaInsets.bottom + 34, 52)
+
+      ZStack(alignment: .top) {
+        Color.black.opacity(0.66)
+          .ignoresSafeArea()
+
+        VStack(spacing: 0) {
+          Text("Cover the top area of the screen\nto decrypt the message.")
+            .font(.system(size: 23, weight: .bold, design: .rounded))
+            .multilineTextAlignment(.center)
+            .lineSpacing(3)
+            .foregroundStyle(Color(red: 0.38, green: 0.78, blue: 0.55))
+            .minimumScaleFactor(0.82)
+            .padding(.horizontal, 28)
+            .padding(.top, max(proxy.safeAreaInsets.top + 86, 118))
+
+          Image("HandsOnScreenGuide")
+            .resizable()
+            .renderingMode(.original)
+            .scaledToFit()
+            .frame(width: min(proxy.size.width * 1.12, 520))
+            .shadow(color: Color(red: 0.38, green: 0.78, blue: 0.55).opacity(0.28), radius: 16)
+            .padding(.top, 72)
+
+          Spacer(minLength: 24)
+
+          HandPlacementOKButton(progress: countdownProgress, action: onOK)
+            .frame(height: 58)
+            .padding(.horizontal, 52)
+            .padding(.bottom, bottomPadding)
+        }
+        .frame(width: proxy.size.width, height: proxy.size.height)
+      }
+      .accessibilityLabel("Hand placement guide")
+      .onAppear {
+        countdownProgress = 0
+
+        withAnimation(.linear(duration: 5.0)) {
+          countdownProgress = 1
+        }
+      }
+    }
+    .ignoresSafeArea()
+  }
+}
+
+private struct HandPlacementOKButton: View {
+  let progress: Double
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      GeometryReader { proxy in
+        ZStack(alignment: .leading) {
+          RoundedRectangle(cornerRadius: 8)
+            .fill(Color.black.opacity(0.22))
+            .overlay(
+              RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(red: 0.38, green: 0.78, blue: 0.55), lineWidth: 1.3)
+            )
+
+          RoundedRectangle(cornerRadius: 8)
+            .fill(Color(red: 0.38, green: 0.78, blue: 0.55))
+            .frame(width: proxy.size.width * progress)
+            .animation(.linear(duration: 5.0), value: progress)
+
+          Text("ok")
+            .font(.system(size: 24, weight: .bold, design: .rounded))
+            .foregroundStyle(Color(red: 0.38, green: 0.78, blue: 0.55))
+            .frame(width: proxy.size.width, height: proxy.size.height)
+
+          Text("ok")
+            .font(.system(size: 24, weight: .bold, design: .rounded))
+            .foregroundStyle(Color(red: 0.035, green: 0.13, blue: 0.085))
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .frame(width: proxy.size.width * progress, alignment: .leading)
+            .clipped()
+            .animation(.linear(duration: 5.0), value: progress)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+      }
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("OK")
+    .accessibilityHint("Dismisses the hand placement guide")
   }
 }
 

@@ -398,7 +398,7 @@ struct SealedMessageRootView: View {
               isShowingSentMessages = true
             },
             onShowOnboarding: {
-              isShowingOnboarding = true
+              presentOnboarding()
             },
             onShowPrivacySettings: {
               isShowingPrivacySettings = true
@@ -491,6 +491,8 @@ struct SealedMessageRootView: View {
     }
     .onAppear {
       if !hasCompletedOnboarding {
+        hasCompletedOnboarding = true
+        dismissKeyboard()
         isShowingOnboarding = true
       }
     }
@@ -499,6 +501,14 @@ struct SealedMessageRootView: View {
       incomingLink = url.absoluteString
       incomingPIN = ""
       mode = .open
+    }
+  }
+
+  private func presentOnboarding() {
+    dismissKeyboard()
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+      isShowingOnboarding = true
     }
   }
 }
@@ -1168,6 +1178,7 @@ private struct ComposeSealedMessageView: View {
           }
           .buttonStyle(PrimaryActionButtonStyle())
           .disabled(!canCreate)
+          .background(ScrollIntoViewOnTrigger(trigger: focusedField == .pin))
           .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
 
@@ -1374,6 +1385,88 @@ private struct ComposeSealedMessageView: View {
         isOnboardingPINRevealPending = false
       }
     }
+  }
+}
+
+private struct ScrollIntoViewOnTrigger: UIViewRepresentable {
+  let trigger: Bool
+
+  func makeUIView(context: Context) -> UIView {
+    UIView(frame: .zero)
+  }
+
+  func updateUIView(_ uiView: UIView, context: Context) {
+    guard trigger else {
+      context.coordinator.cancelPendingScroll()
+      return
+    }
+
+    context.coordinator.scrollIntoView(uiView)
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator()
+  }
+
+  final class Coordinator {
+    private var lastTriggerDate = Date.distantPast
+    private var scrollGeneration = 0
+
+    func scrollIntoView(_ view: UIView) {
+      let now = Date()
+      guard now.timeIntervalSince(lastTriggerDate) > 0.25 else {
+        return
+      }
+
+      lastTriggerDate = now
+      scrollGeneration += 1
+      let generation = scrollGeneration
+
+      for delay in [0.12, 0.34] {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak view] in
+          guard let view,
+                view.window != nil,
+                generation == self.scrollGeneration else {
+            return
+          }
+
+          view.scrollNearestAncestorToVisible(extraBottomMargin: 18)
+        }
+      }
+    }
+
+    func cancelPendingScroll() {
+      scrollGeneration += 1
+    }
+  }
+}
+
+private func dismissKeyboard() {
+  UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+}
+
+private extension UIView {
+  func scrollNearestAncestorToVisible(extraBottomMargin: CGFloat) {
+    guard let scrollView = firstSuperview(of: UIScrollView.self) else {
+      return
+    }
+
+    let targetRect = convert(bounds, to: scrollView).insetBy(dx: 0, dy: -extraBottomMargin)
+    scrollView.scrollRectToVisible(targetRect, animated: true)
+  }
+
+  func firstSuperview<T: UIView>(of type: T.Type) -> T? {
+    var candidate = superview
+
+    while let current = candidate {
+      if let typed = current as? T {
+        return typed
+      }
+
+      candidate = current.superview
+    }
+
+    return nil
   }
 }
 
@@ -2330,6 +2423,7 @@ private struct OnboardingView: View {
         PrivacyReaderView(
           message: onboardingReaderMessage,
           showsFontControls: false,
+          showsHandPlacementGuide: true,
           onRevealPerformed: {
             didRevealMessage = true
           },

@@ -125,7 +125,7 @@ type MessageStats = {
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-L0mMwZH2Y8BB9JbniZ5Xbk2cWIpVpMQyZCg7II8HSNM=' 'sha256-jV/YTTPdPdYxQ4KasU5NffuPLChgovdtiYvck0B/a0Q='; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-L0mMwZH2Y8BB9JbniZ5Xbk2cWIpVpMQyZCg7II8HSNM=' 'sha256-jV/YTTPdPdYxQ4KasU5NffuPLChgovdtiYvck0B/a0Q='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -1654,7 +1654,8 @@ async function homePage(env: Env): Promise<string> {
             </div>
           </div>
           <div class="actions">
-            <a class="button primary" href="${escapeAttribute(links.appStoreUrl)}">Open on App Store</a>
+            <a class="button primary" href="${escapeAttribute(links.testFlightUrl)}" rel="noreferrer">Now in open beta</a>
+            <a class="button" href="${escapeAttribute(links.appStoreUrl)}">Open on App Store</a>
             <a class="button" href="/support">Support</a>
             <a class="button ghost" href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
             <a class="button ghost" href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
@@ -1852,6 +1853,9 @@ function pageShell(title: string, env: Env, content: string, appArgument?: strin
     ${appArgument ? fragmentForwardingScript() : ""}
     <meta name="description" content="${escapeAttribute(description)}">
     <meta name="theme-color" content="#08100b">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
     <meta property="og:title" content="${escapedTitle}">
     <meta property="og:description" content="${escapeAttribute(description)}">
     <meta property="og:type" content="website">
