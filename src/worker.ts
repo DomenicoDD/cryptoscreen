@@ -1618,25 +1618,6 @@ async function homePage(env: Env): Promise<string> {
     env,
     `
       <section class="hero">
-        <div class="reader-scene" aria-hidden="true">
-          <div class="reader-lines top">
-            <span>U7MZ /FQ6 V$L9 10RQ KQ*8</span>
-            <span>DC1X 8J%4 2QFA PV37 L/0X</span>
-            <span>41KR YN9Q K#L0 M44C VZ1B</span>
-            <span>9AF3 P$8L DQ20 QK17 NQ#M</span>
-            <span>QL50 ZJ6P 8KNR VV1X C0DE</span>
-          </div>
-          <div class="reveal-band">
-            <span>Read one line. Move the page. Let the rest fall back.</span>
-          </div>
-          <div class="reader-lines bottom">
-            <span>J7Y4 K%Q1 H8NN ZPL0 M2VX</span>
-            <span>TY09 DKL4 C#P8 F17M XQ22</span>
-            <span>Q681 41JQ B$Q 1F87 UZ5Q</span>
-            <span>B*F4 %1Z ZS88 W3LZ YN07</span>
-            <span>PX3D LQ12 H#6K TM0Z 88AC</span>
-          </div>
-        </div>
         <div class="hero-illustration">
           <img src="/assets/hands-on-screen.svg" width="404" height="396" alt="Hand placement guide illustration from cryptoscreen onboarding">
         </div>
@@ -2212,46 +2193,6 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         background: oklch(85% 0.2 152);
         color: var(--accent-ink);
       }
-      .reader-scene {
-        position: absolute;
-        inset: 0;
-        z-index: -2;
-        display: grid;
-        grid-template-rows: 1fr auto 1fr;
-        padding: clamp(28px, 5vw, 64px);
-        opacity: 0.9;
-      }
-      .reader-lines {
-        display: grid;
-        align-content: center;
-        gap: clamp(8px, 1.8vw, 18px);
-        min-width: 760px;
-        margin-left: clamp(120px, 28vw, 390px);
-        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-        font-size: clamp(17px, 2.7vw, 35px);
-        line-height: 1.1;
-        color: oklch(91% 0.02 116 / 0.24);
-        white-space: nowrap;
-      }
-      .reader-lines span {
-        display: block;
-      }
-      .reveal-band {
-        display: grid;
-        align-items: center;
-        min-height: clamp(72px, 18vw, 168px);
-        margin: 0 calc(clamp(28px, 5vw, 64px) * -1);
-        padding-left: clamp(180px, 36vw, 520px);
-        background: oklch(79% 0.21 152 / 0.08);
-        border-block: 1px solid oklch(79% 0.21 152 / 0.22);
-        box-shadow: 0 0 80px oklch(79% 0.21 152 / 0.13);
-        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-        font-size: clamp(18px, 3.6vw, 44px);
-        font-weight: 700;
-        line-height: 1.15;
-        color: var(--ink);
-        white-space: nowrap;
-      }
       .section {
         padding: clamp(42px, 9vw, 96px) 0;
       }
@@ -2472,17 +2413,6 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
           right: -84px;
           top: 76px;
           width: 320px;
-        }
-        .reader-scene { padding: 24px 16px; }
-        .reader-lines {
-          min-width: 560px;
-          margin-left: 124px;
-          font-size: 24px;
-        }
-        .reveal-band {
-          min-height: 112px;
-          padding-left: 135px;
-          font-size: 28px;
         }
         .split, .steps, .apple-strip, .security-hero, .numbered-section, .security-grid, .security-callout { grid-template-columns: 1fr; }
         .section { padding: 42px 0; }
