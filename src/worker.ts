@@ -218,6 +218,10 @@ export default {
         return htmlResponse(termsPage(env));
       }
 
+      if (url.pathname === "/security") {
+        return htmlResponse(securityPage(env));
+      }
+
       if (url.pathname === "/support") {
         return htmlResponse(supportPage(env));
       }
@@ -1696,6 +1700,7 @@ async function homePage(env: Env): Promise<string> {
         </div>
         <nav class="link-list" aria-label="Apple review">
           <a href="/privacy">Privacy Policy</a>
+          <a href="/security">Security Resources</a>
           <a href="/support">Support</a>
           <a href="/.well-known/apple-app-site-association">Apple association</a>
           <a href="/m/example-message-id">Universal link page</a>
@@ -1790,6 +1795,134 @@ function termsPage(env: Env): string {
         <p>The service may change during beta. Do not use cryptoscreen as the only copy of important information. If you install through TestFlight, Apple's TestFlight beta terms also apply. Apple may collect crash logs, beta usage information, and TestFlight feedback and share them with the app provider. This TestFlight channel is separate from cryptoscreen's own app telemetry choices and will not apply to the normal App Store release.</p>
         <h2>Privacy</h2>
         <p>The Privacy & Security Policy explains what data is stored, what is not stored, and which optional reports can be enabled in the app.</p>
+      </section>
+    `
+  );
+}
+
+function securityPage(env: Env): string {
+  const links = siteLinks(env);
+
+  return pageShell(
+    "Security Resources",
+    env,
+    `
+      <section class="security-hero">
+        <div>
+          <p class="eyebrow">Security Resources</p>
+          <h1>Security architecture for one-time iPhone notes.</h1>
+          <p class="lede">
+            cryptoscreen is built around local encryption, PIN-gated opening, short-lived server rows, and explicit limits. This page explains what is protected, what the server stores, and where the trust boundary ends.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="${escapeAttribute(links.testFlightUrl)}" rel="noreferrer">Join TestFlight</a>
+            <a class="button" href="/privacy">Privacy Policy</a>
+            <a class="button ghost" href="/support">Support</a>
+          </div>
+        </div>
+        <nav class="toc" aria-label="Security page sections">
+          <a href="#basics"><span>01</span> Security basics</a>
+          <a href="#cryptography"><span>02</span> Cryptography</a>
+          <a href="#storage"><span>03</span> Storage and deletion</a>
+          <a href="#operations"><span>04</span> Operational security</a>
+          <a href="#threat-model"><span>05</span> Threat model</a>
+        </nav>
+      </section>
+
+      <section class="numbered-section" id="basics">
+        <div>
+          <span class="section-number">01</span>
+          <p class="eyebrow">Security basics</p>
+          <h2>The message is sealed before upload.</h2>
+        </div>
+        <div class="copy-stack">
+          <p>The sender writes the note in the iPhone app. The app derives the content key locally from the link secret and six-digit PIN, encrypts the plaintext, and uploads only encrypted bytes plus the metadata needed to enforce expiry and PIN attempts.</p>
+          <p>The URL fragment after <code>#s=</code> carries the link secret. Browsers do not send that fragment to the Worker in normal HTTP requests, so the server receives the message id but not the decryption secret.</p>
+          <p>The PIN is not stored by cryptoscreen. The app sends a PIN proof so the Worker can decide whether to release the encrypted payload without learning the PIN or plaintext.</p>
+        </div>
+      </section>
+
+      <section class="security-grid" id="cryptography" aria-label="Cryptography details">
+        <article>
+          <span>02A</span>
+          <h3>AES-GCM message encryption</h3>
+          <p>Message text is encrypted with Apple CryptoKit <code>AES.GCM</code>. The API stores ciphertext, nonce, tag, and salt separately.</p>
+        </article>
+        <article>
+          <span>02B</span>
+          <h3>HKDF-SHA256 key derivation</h3>
+          <p>The content key is derived from a 32-byte link secret, the normalized six-digit PIN, and a 16-byte per-message salt using HKDF-SHA256.</p>
+        </article>
+        <article>
+          <span>02C</span>
+          <h3>PIN verifier separation</h3>
+          <p>The online PIN proof uses a separate HKDF-SHA256 context and is stored by the Worker only after applying a server-side pepper.</p>
+        </article>
+        <article>
+          <span>02D</span>
+          <h3>Image attachment wrapping</h3>
+          <p>Image attachments use a random 32-byte file key. The image is encrypted with that key, then the file key is encrypted with the message key.</p>
+        </article>
+      </section>
+
+      <section class="numbered-section" id="storage">
+        <div>
+          <span class="section-number">03</span>
+          <p class="eyebrow">Storage and deletion</p>
+          <h2>The server stores enough to enforce one controlled read.</h2>
+        </div>
+        <div class="copy-stack">
+          <p>Neon stores encrypted message bytes, nonce, tag, salt, expiry time, failed attempt count, and a server-peppered PIN verifier. Cloudflare R2 stores encrypted image object bytes when an image is attached.</p>
+          <p>User message rows delete after one successful read, after the third wrong PIN attempt, when the sender expires the message, or after ${LINK_RETENTION_DAYS} days if unopened. Encrypted attachment objects are removed after their one-time download or scheduled cleanup.</p>
+          <p>cryptoscreen keeps minimal delivery status so the app can show whether a sent message was consumed, expired, destroyed, or reported a screenshot event when reciprocal interaction status is enabled. That status does not include plaintext, image plaintext, PINs, link secrets, sender contacts, or recipient contacts.</p>
+        </div>
+      </section>
+
+      <section class="numbered-section" id="operations">
+        <div>
+          <span class="section-number">04</span>
+          <p class="eyebrow">Operational security</p>
+          <h2>The public site and API run behind strict browser and edge controls.</h2>
+        </div>
+        <div class="copy-stack">
+          <ul class="security-list">
+            <li>No ad SDKs, tracking SDKs, third-party analytics SDKs, accounts, or contact upload.</li>
+            <li>Security headers include a restrictive Content Security Policy, no-referrer policy, HSTS, and frame blocking.</li>
+            <li>The Cloudflare Worker validates request sizes, payload formats, attachment types, UUIDs, TTL bounds, and supported image content types.</li>
+            <li>Application logs must not intentionally include plaintext, PINs, PIN proofs, full message links, or raw image data.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="security-grid" id="threat-model" aria-label="Threat model and limitations">
+        <article>
+          <span>05A</span>
+          <h3>Designed to protect</h3>
+          <p>Message plaintext, raw image bytes, link secrets, PIN values, and one-time read behavior from routine server-side access or database-only compromise.</p>
+        </article>
+        <article>
+          <span>05B</span>
+          <h3>Required assumptions</h3>
+          <p>The sender and recipient devices are trusted while encrypting or reading, iOS CryptoKit behaves correctly, and the delivered app build has not been maliciously modified.</p>
+        </article>
+        <article>
+          <span>05C</span>
+          <h3>Best-effort protections</h3>
+          <p>Screenshot and screen recording responses reduce accidental exposure. iOS reports screenshots after capture, and external cameras cannot be detected.</p>
+        </article>
+        <article>
+          <span>05D</span>
+          <h3>Not covered</h3>
+          <p>Compromised devices, malicious recipients, external cameras, phishing, social engineering, copied content after display, or link/PIN sharing with the wrong person.</p>
+        </article>
+      </section>
+
+      <section class="security-callout">
+        <div>
+          <p class="eyebrow">Technical integrity</p>
+          <h2>Security claims should stay measurable.</h2>
+        </div>
+        <p>cryptoscreen does not promise magic disappearing text. It promises a narrower system: encrypt locally, avoid server plaintext, release encrypted payloads only after a correct PIN proof, consume normal links once, and be clear about the limits.</p>
       </section>
     `
   );
@@ -2138,6 +2271,84 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         grid-template-columns: minmax(0, 1fr) minmax(220px, 360px);
         gap: 28px;
       }
+      .security-hero {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background:
+          linear-gradient(135deg, oklch(79% 0.21 152 / 0.08), transparent 42%),
+          var(--panel);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+        gap: clamp(28px, 7vw, 78px);
+        padding: clamp(24px, 6vw, 54px);
+      }
+      .security-hero h1 {
+        font-size: clamp(40px, 8vw, 78px);
+        max-width: 780px;
+      }
+      .toc {
+        align-content: start;
+        display: grid;
+        gap: 10px;
+      }
+      .toc a {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--soft-ink);
+        display: grid;
+        gap: 6px;
+        padding: 13px 14px;
+        text-decoration: none;
+      }
+      .toc a:hover {
+        border-color: var(--line-strong);
+        color: var(--ink);
+      }
+      .toc span, .section-number {
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .numbered-section {
+        border-top: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+        gap: clamp(28px, 8vw, 96px);
+        padding: clamp(42px, 9vw, 96px) 0;
+      }
+      .section-number {
+        display: block;
+        margin-bottom: 18px;
+      }
+      .security-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        padding-bottom: clamp(42px, 9vw, 96px);
+      }
+      .security-grid article {
+        min-height: 260px;
+      }
+      .security-list {
+        color: var(--muted);
+        display: grid;
+        gap: 12px;
+        line-height: 1.6;
+        margin: 0;
+        padding-left: 18px;
+      }
+      .security-list li::marker {
+        color: var(--accent);
+      }
+      .security-callout {
+        border: 1px solid oklch(79% 0.21 152 / 0.28);
+        border-radius: 8px;
+        background: oklch(79% 0.21 152 / 0.06);
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+        gap: 28px;
+        padding: clamp(22px, 5vw, 34px);
+      }
       .link-list {
         display: grid;
         align-content: start;
@@ -2247,8 +2458,10 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
           padding-left: 135px;
           font-size: 28px;
         }
-        .split, .steps, .apple-strip { grid-template-columns: 1fr; }
+        .split, .steps, .apple-strip, .security-hero, .numbered-section, .security-grid, .security-callout { grid-template-columns: 1fr; }
         .section { padding: 42px 0; }
+        .security-grid { padding-bottom: 42px; }
+        .security-grid article { min-height: 0; }
       }
     </style>
   </head>
@@ -2258,6 +2471,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         <a class="brand" href="/">cryptoscreen</a>
         <nav aria-label="Main">
           <a href="/privacy">Privacy</a>
+          <a href="/security">Security</a>
           <a href="/terms">Terms</a>
           <a href="/support">Support</a>
           <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
@@ -2270,6 +2484,8 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         <span>cryptoscreen.app, one-time encrypted message beta</span>
         <span>
           <a href="/privacy">Privacy</a>
+          &nbsp;/&nbsp;
+          <a href="/security">Security</a>
           &nbsp;/&nbsp;
           <a href="/terms">Terms</a>
           &nbsp;/&nbsp;
