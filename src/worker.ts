@@ -1637,6 +1637,9 @@ async function homePage(env: Env): Promise<string> {
             <span>PX3D LQ12 H#6K TM0Z 88AC</span>
           </div>
         </div>
+        <div class="hero-illustration">
+          <img src="/assets/hands-on-screen.svg" width="404" height="396" alt="Hand placement guide illustration from cryptoscreen onboarding">
+        </div>
         <div class="hero-copy">
           <p class="eyebrow">One-time private reading</p>
           <h1>cryptoscreen</h1>
@@ -2077,8 +2080,25 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         z-index: -1;
       }
       .hero-copy {
-        max-width: 760px;
+        max-width: 680px;
         padding: clamp(28px, 7vw, 78px);
+        position: relative;
+        z-index: 1;
+      }
+      .hero-illustration {
+        position: absolute;
+        right: clamp(22px, 7vw, 92px);
+        top: clamp(40px, 9vw, 118px);
+        width: min(36vw, 430px);
+        z-index: 0;
+        filter: drop-shadow(0 0 22px oklch(79% 0.21 152 / 0.28));
+        opacity: 0.94;
+        pointer-events: none;
+      }
+      .hero-illustration img {
+        display: block;
+        height: auto;
+        width: 100%;
       }
       .eyebrow {
         color: var(--accent);
@@ -2447,6 +2467,12 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         .stat-label { font-size: 10px; }
         .actions { align-items: stretch; flex-direction: column; }
         .button { width: 100%; }
+        .hero-illustration {
+          opacity: 0.26;
+          right: -84px;
+          top: 76px;
+          width: 320px;
+        }
         .reader-scene { padding: 24px 16px; }
         .reader-lines {
           min-width: 560px;
