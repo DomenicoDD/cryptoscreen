@@ -39,7 +39,7 @@
     "IOS_BUNDLE_ID": "com.example.cryptoscreen",
     "APP_CLIP_BUNDLE_ID": "com.example.cryptoscreen.Clip",
     "GITHUB_REPOSITORY_URL": "https://github.com/DomenicoDD/cryptoscreen",
-    "TESTFLIGHT_PUBLIC_URL": "https://testflight.apple.com/join/ykqncUF5",
+    "APP_STORE_URL": "https://apps.apple.com/us/app/cryptoscreen/id6779173642",
     "X_PROFILE_URL": "https://x.com/DomenicoDD",
     "SUPPORT_EMAIL": "domenico@cryptoscreen.app",
     "FEEDBACK_EMAIL": "domenico@cryptoscreen.app",

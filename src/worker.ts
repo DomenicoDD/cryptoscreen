@@ -125,7 +125,7 @@ type MessageStats = {
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-L0mMwZH2Y8BB9JbniZ5Xbk2cWIpVpMQyZCg7II8HSNM=' 'sha256-jV/YTTPdPdYxQ4KasU5NffuPLChgovdtiYvck0B/a0Q='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-L0mMwZH2Y8BB9JbniZ5Xbk2cWIpVpMQyZCg7II8HSNM=' 'sha256-jV/YTTPdPdYxQ4KasU5NffuPLChgovdtiYvck0B/a0Q='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -1642,10 +1642,13 @@ async function homePage(env: Env): Promise<string> {
             </div>
           </div>
           <div class="actions">
-            <a class="button primary" href="${escapeAttribute(links.testFlightUrl)}" rel="noreferrer">Now in open beta</a>
+            <a class="button primary" href="${escapeAttribute(links.appStoreUrl)}" rel="noreferrer">Download on the App Store</a>
             <a class="button" href="/support">Support</a>
             <a class="button ghost" href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
             <a class="button ghost" href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
+          </div>
+          <div class="sponsor-cta" aria-label="Sponsor the project">
+            <iframe src="https://github.com/sponsors/DomenicoDD/button" title="Sponsor DomenicoDD" height="32" width="114" loading="lazy"></iframe>
           </div>
         </div>
       </section>
@@ -1716,11 +1719,11 @@ function messagePage(url: URL, env: Env): string {
         </p>
         <div class="actions">
           <a class="button primary" data-open-message href="${escapeAttribute(messageUrl)}">Open message</a>
-          <a class="button" href="${escapeAttribute(links.testFlightUrl)}">Join TestFlight</a>
+          <a class="button" href="${escapeAttribute(links.appStoreUrl)}">Download on the App Store</a>
           <a class="button" href="/support">Support</a>
         </div>
         <p class="hint">
-          On iPhone, this button uses the same universal link. If the app is installed, iOS opens the app. Otherwise, join the TestFlight beta.
+          On iPhone, this button uses the same universal link. If the app is installed, iOS opens the app. Otherwise, install cryptoscreen from the App Store.
         </p>
       </section>
     `,
@@ -1749,8 +1752,8 @@ function privacyPage(env: Env): string {
         <p>Interaction status sharing is opt-in in the app's Privacy settings and works reciprocally. If it is off, the app does not send optional read or screenshot status and does not fetch or show detailed interaction status for messages you sent. If it is on, you can see detailed interaction status only when the reader also shared interaction status from their app. Screenshot reports contain only a generic screenshot event and timestamp for that message. Screenshot detection is best-effort: iOS reports normal screenshots after capture, modified clients can omit reporting, and external cameras cannot be detected.</p>
         <p>The service also keeps an aggregate count of how many sealed messages have been shared. That counter does not include message content, recipients, senders, or link secrets.</p>
         <p>If you send feedback from inside the app, the service processes the rating, feedback text, app version/build, platform/device information, and timestamp to deliver that support request to the maintainer.</p>
-        <h2>TestFlight beta data</h2>
-        <p>During TestFlight beta testing, Apple separately collects crash logs, beta usage information, and any feedback you submit through TestFlight, then shares that information with the app provider under Apple's TestFlight privacy terms. This is Apple beta-testing infrastructure, not a cryptoscreen tracking SDK. Public-link testers' name and email address are not displayed to the developer by Apple. If you were invited directly by email, Apple may show the invited tester name and email in TestFlight. The App Store release will not use TestFlight.</p>
+        <h2>App Store data</h2>
+        <p>Apple separately processes App Store downloads, crash diagnostics, reviews, and any App Store support interactions under Apple's own terms. This is Apple platform infrastructure, not a cryptoscreen tracking SDK.</p>
         <h2>Operational data</h2>
         <p>Cloudflare, Neon, and Cloudflare R2 provide the infrastructure for the public site, API, database, and encrypted attachment storage. They may process standard infrastructure logs needed to operate, secure, and debug the service. cryptoscreen application logs must not intentionally include plaintext, PINs, proofs, full message links, or raw image data.</p>
         <h2>Limits</h2>
@@ -1770,13 +1773,13 @@ function termsPage(env: Env): string {
       <section class="panel prose">
         <p class="eyebrow">Terms of Service</p>
         <h1>cryptoscreen Terms of Service</h1>
-        <p>cryptoscreen is a beta tool for one-time encrypted notes. Use it only for content you are allowed to share and only with people you trust.</p>
+        <p>cryptoscreen is a tool for one-time encrypted notes. Use it only for content you are allowed to share and only with people you trust.</p>
         <h2>Security model</h2>
         <p>The service is designed so message plaintext, raw image bytes, PINs, and decryption keys are not available to the server. The app cannot protect content after a recipient has legitimately viewed it, and it cannot prevent external cameras, compromised devices, or modified clients.</p>
         <h2>Availability and deletion</h2>
         <p>Normal user messages are intended to be available for one successful read, destroyed after the third wrong PIN attempt, manually expired by the sender, or expired after ${LINK_RETENTION_DAYS} days if unopened. Deleted or expired messages cannot be recovered by cryptoscreen. Because unavailable links stop opening, people with the link may be able to infer that one of those events happened.</p>
-        <h2>Beta status</h2>
-        <p>The service may change during beta. Do not use cryptoscreen as the only copy of important information. If you install through TestFlight, Apple's TestFlight beta terms also apply. Apple may collect crash logs, beta usage information, and TestFlight feedback and share them with the app provider. This TestFlight channel is separate from cryptoscreen's own app telemetry choices and will not apply to the normal App Store release.</p>
+        <h2>Service changes</h2>
+        <p>The service may change over time. Do not use cryptoscreen as the only copy of important information.</p>
         <h2>Privacy</h2>
         <p>The Privacy & Security Policy explains what data is stored, what is not stored, and which optional reports can be enabled in the app.</p>
       </section>
@@ -1799,7 +1802,7 @@ function securityPage(env: Env): string {
             cryptoscreen is built around local encryption, PIN-gated opening, short-lived server rows, and explicit limits. This page explains what is protected, what the server stores, and where the trust boundary ends.
           </p>
           <div class="actions">
-            <a class="button primary" href="${escapeAttribute(links.testFlightUrl)}" rel="noreferrer">Join TestFlight</a>
+            <a class="button primary" href="${escapeAttribute(links.appStoreUrl)}" rel="noreferrer">Download on the App Store</a>
             <a class="button" href="/privacy">Privacy Policy</a>
             <a class="button ghost" href="/support">Support</a>
           </div>
@@ -1922,17 +1925,15 @@ function supportPage(env: Env): string {
       <section class="panel prose">
         <p class="eyebrow">Support</p>
         <h1>cryptoscreen Support</h1>
-        <p>For help with TestFlight builds, message links, or deletion behavior, contact <a href="mailto:${escapeAttribute(links.supportEmail)}">${escapeHtml(links.supportEmail)}</a>.</p>
-        <h2>Current beta behavior</h2>
-        <p>User messages delete after one successful read, after the third wrong PIN, or after ${LINK_RETENTION_DAYS} days if never opened. Encrypted image attachment objects delete after their one-time attachment download or during scheduled expiry cleanup. Service-owned review/demo rows may be retained so Apple and TestFlight testers can repeatedly verify App Clip invocation.</p>
+        <p>For help with App Store installs, message links, or deletion behavior, contact <a href="mailto:${escapeAttribute(links.supportEmail)}">${escapeHtml(links.supportEmail)}</a>.</p>
+        <h2>Current behavior</h2>
+        <p>User messages delete after one successful read, after the third wrong PIN, or after ${LINK_RETENTION_DAYS} days if never opened. Encrypted image attachment objects delete after their one-time attachment download or during scheduled expiry cleanup. Service-owned review/demo rows may be retained so Apple can repeatedly verify App Clip invocation.</p>
         <h2>Project links</h2>
         <p>
           Follow development on <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a> or contact the maintainer on <a href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>.
         </p>
         <h2>Safety note</h2>
         <p>Screenshot and screen recording protections are best-effort iOS protections. They reduce accidental exposure but cannot guarantee protection against external cameras or compromised devices. Interaction status sharing, including optional screenshot reports to the sender, is opt-in in the app's Privacy settings and works reciprocally.</p>
-        <h2>TestFlight note</h2>
-        <p>Apple's TestFlight warning is standard for beta apps. TestFlight can share crash logs, beta usage information, and submitted beta feedback with the app provider. cryptoscreen does not add ad tracking SDKs or third-party analytics SDKs.</p>
       </section>
     `
   );
@@ -2163,6 +2164,17 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         flex-wrap: wrap;
         gap: 12px;
         margin-top: 28px;
+      }
+      .sponsor-cta {
+        display: flex;
+        margin-top: 14px;
+      }
+      .sponsor-cta iframe {
+        border: 0;
+        border-radius: 6px;
+        display: block;
+        height: 32px;
+        width: 114px;
       }
       .button {
         border: 1px solid var(--line);
@@ -2408,6 +2420,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         .stat-label { font-size: 10px; }
         .actions { align-items: stretch; flex-direction: column; }
         .button { width: 100%; }
+        .sponsor-cta { justify-content: center; }
         .hero-illustration {
           opacity: 0.26;
           right: -84px;
@@ -2437,7 +2450,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       </header>
       <main>${content}</main>
       <footer>
-        <span>cryptoscreen.app, one-time encrypted message beta</span>
+        <span>cryptoscreen.app, one-time encrypted messages</span>
         <span>
           <a href="/privacy">Privacy</a>
           &nbsp;/&nbsp;
@@ -2533,7 +2546,7 @@ function fragmentForwardingScript(): string {
 function siteLinks(env: Env): {
   githubUrl: string;
   supportEmail: string;
-  testFlightUrl: string;
+  appStoreUrl: string;
   xUrl: string;
 } {
   const vars = env as unknown as Record<string, string | undefined>;
@@ -2541,7 +2554,7 @@ function siteLinks(env: Env): {
   return {
     githubUrl: externalUrl(vars.GITHUB_REPOSITORY_URL ?? "https://github.com/DomenicoDD/cryptoscreen"),
     supportEmail: emailAddress(vars.SUPPORT_EMAIL ?? "domenico@cryptoscreen.app"),
-    testFlightUrl: externalUrl(vars.TESTFLIGHT_PUBLIC_URL ?? "https://testflight.apple.com/join/ykqncUF5"),
+    appStoreUrl: externalUrl(vars.APP_STORE_URL ?? "https://apps.apple.com/us/app/cryptoscreen/id6779173642"),
     xUrl: externalUrl(vars.X_PROFILE_URL ?? "https://x.com/DomenicoDD")
   };
 }

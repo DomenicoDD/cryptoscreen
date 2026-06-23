@@ -10,7 +10,7 @@ What cryptoscreen does:
 - Expires unopened links after the retention window.
 - Uses a guarded reader that reduces casual screen exposure.
 - Wipes the visible reader session if iOS reports a screenshot.
-- Supports encrypted image attachments while the feature is free in beta.
+- Supports encrypted image attachments while the feature is free at launch.
 - Supports App Clip opening for lightweight receiving.
 
 cryptoscreen is designed to avoid accounts, profiles, contact lists, and message plaintext on the server. The production service stores encrypted bytes, encrypted image attachment objects when supplied, attempt metadata, and expiry metadata. Screenshot protection is best-effort: iOS reports normal screenshots after capture, and no app can protect against external cameras or compromised devices.

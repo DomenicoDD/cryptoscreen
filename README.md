@@ -36,7 +36,7 @@ The production model is:
 - A correct PIN atomically returns ciphertext and deletes the row.
 - The third wrong PIN atomically deletes the row.
 - Unopened links expire and are deleted after 30 days.
-- Service-owned retained demo/review rows can be reused for App Review and TestFlight invocation testing.
+- Service-owned retained demo/review rows can be reused for App Review invocation testing.
 
 Read the detailed design in [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -185,7 +185,7 @@ wrangler.example.jsonc         Copyable Worker config template
 
 - Normal screenshots cannot be prevented reliably with public iOS APIs. The app can redact and destroy the visible reader session after screenshot notification, and it can redact during screen recording/mirroring.
 - The App Clip target is present and builds locally, but still needs production invocation testing from a real App Clip URL.
-- Associated Domains and App Clip capabilities must be enabled for the Apple App IDs before TestFlight/App Store signing with entitlements.
+- Associated Domains and App Clip capabilities must be enabled for the Apple App IDs before App Store signing with entitlements.
 - A six-digit PIN is not enough by itself. The design requires the high-entropy link secret plus the PIN.
 
 ## Contributing
