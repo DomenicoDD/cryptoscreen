@@ -12,7 +12,6 @@ private let proImageAttachmentsEnabled = true
 private let demoCardImageAssetName = "DemoCard"
 private let sentMessagesStorageKey = "cryptoscreen.sentMessages"
 private let interactionStatusSharingOptInKey = "cryptoscreen.reporting.screenshotEvents"
-private let appStoreDownloadURL = URL(string: "https://apps.apple.com/us/app/cryptoscreen/id6779173642")!
 private let onboardingReaderMessage = """
 This is a cryptoscreen message.
 
@@ -388,11 +387,7 @@ struct SealedMessageRootView: View {
   @State private var isShowingPrivacySettings = false
 
   var body: some View {
-    if isRunningFromTestFlight {
-      TestFlightMigrationView()
-    } else {
-      mainInterface
-    }
+    mainInterface
   }
 
   private var mainInterface: some View {
@@ -515,62 +510,11 @@ struct SealedMessageRootView: View {
     }
   }
 
-  private var isRunningFromTestFlight: Bool {
-    Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
-  }
-
   private func presentOnboarding() {
     dismissKeyboard()
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
       isShowingOnboarding = true
-    }
-  }
-}
-
-private struct TestFlightMigrationView: View {
-  var body: some View {
-    ZStack {
-      Color(red: 0.045, green: 0.047, blue: 0.043)
-        .ignoresSafeArea()
-
-      VStack(alignment: .leading, spacing: 24) {
-        VStack(alignment: .leading, spacing: 10) {
-          Text("cryptoscreen")
-            .font(.system(size: 18, weight: .semibold, design: .rounded))
-            .foregroundStyle(Color.white.opacity(0.62))
-
-          Text("The beta has moved to the App Store.")
-            .font(.system(size: 36, weight: .semibold, design: .rounded))
-            .foregroundStyle(.white)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-
-        VStack(alignment: .leading, spacing: 14) {
-          Text("Thanks for testing cryptoscreen. The public App Store version is now live, and this TestFlight build will be closed soon.")
-          Text("Install the App Store version directly from this device. You do not need to delete this beta first.")
-        }
-        .font(.system(size: 16, weight: .medium, design: .rounded))
-        .foregroundStyle(Color.white.opacity(0.72))
-        .lineSpacing(3)
-
-        Link(destination: appStoreDownloadURL) {
-          Label("Download on the App Store", systemImage: "arrow.down.app.fill")
-            .font(.system(size: 17, weight: .semibold, design: .rounded))
-            .foregroundStyle(Color(red: 0.055, green: 0.075, blue: 0.06))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(Color(red: 0.48, green: 1.0, blue: 0.70), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .padding(.top, 8)
-
-        Text("If the button does not open, search for “cryptoscreen” in the App Store.")
-          .font(.system(size: 13, weight: .medium, design: .rounded))
-          .foregroundStyle(Color.white.opacity(0.48))
-      }
-      .frame(maxWidth: 520, alignment: .leading)
-      .padding(28)
     }
   }
 }
