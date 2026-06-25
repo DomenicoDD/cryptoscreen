@@ -90,6 +90,7 @@ enum SealedMessageCrypto {
   static let pinLength = 6
   static let defaultMaxAttempts = 3
   static let defaultTimeToLive: TimeInterval = 60 * 60 * 24 * 30
+  static let maxMessagePlaintextByteCount = 64 * 1024
   static let maxImageAttachmentByteCount = 10 * 1024 * 1024
   static let supportedImageContentTypes: Set<String> = ["image/jpeg", "image/png", "image/heic", "image/heif"]
 

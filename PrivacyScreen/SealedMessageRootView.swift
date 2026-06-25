@@ -376,6 +376,7 @@ final class SealedMessageStore: ObservableObject {
 
 struct SealedMessageRootView: View {
   @StateObject private var store = SealedMessageStore()
+  @StateObject private var proImageEntitlements = ProImageEntitlementStore()
   @AppStorage("cryptoscreen.hasCompletedOnboarding") private var hasCompletedOnboarding = false
   @State private var mode: MessageMode = .create
   @State private var openedSession: ReaderSession?
@@ -445,6 +446,7 @@ struct SealedMessageRootView: View {
               case .create:
                 ComposeSealedMessageView(
                   store: store,
+                  proImageEntitlements: proImageEntitlements,
                   onCreatedLink: { link in
                     incomingLink = link.absoluteString
                   },
@@ -490,7 +492,7 @@ struct SealedMessageRootView: View {
     }
 #if !APPCLIP
     .sheet(isPresented: $isShowingOnboarding) {
-      OnboardingView(store: store) {
+      OnboardingView(store: store, proImageEntitlements: proImageEntitlements) {
         hasCompletedOnboarding = true
         isShowingOnboarding = false
       }
@@ -1066,6 +1068,7 @@ private struct ComposeSealedMessageView: View {
   }
 
   @ObservedObject var store: SealedMessageStore
+  @ObservedObject var proImageEntitlements: ProImageEntitlementStore
   let title: String
   let onCreatedLink: (URL) -> Void
   let onTestMessage: (CreatedSealedMessage, String, Data?) -> Void
@@ -1089,12 +1092,14 @@ private struct ComposeSealedMessageView: View {
   @State private var hasEditedMessage = false
   @State private var showsOnboardingImageStep = false
   @State private var showsOnboardingPinStep = false
+  @State private var isShowingImagePaywall = false
   @State private var onboardingRevealTask: Task<Void, Never>?
   @State private var isOnboardingPINRevealPending = false
   @FocusState private var focusedField: FocusedField?
 
   init(
     store: SealedMessageStore,
+    proImageEntitlements: ProImageEntitlementStore,
     title: String = "Create",
     initialMessage: String = defaultComposeMessage,
     initialPIN: String = "",
@@ -1105,6 +1110,7 @@ private struct ComposeSealedMessageView: View {
     onCompletion: @escaping () -> Void = {}
   ) {
     self.store = store
+    self.proImageEntitlements = proImageEntitlements
     self.title = title
     self.onCreatedLink = onCreatedLink
     self.onTestMessage = onTestMessage
@@ -1120,6 +1126,7 @@ private struct ComposeSealedMessageView: View {
       && pin.count == SealedMessageCrypto.pinLength
       && !isPreparingImage
       && !isCreating
+      && (selectedImageData == nil || proImageEntitlements.isImageAttachmentUnlocked)
   }
 
   private var shouldShowImageSection: Bool {
@@ -1183,13 +1190,18 @@ private struct ComposeSealedMessageView: View {
         if proImageAttachmentsEnabled, shouldShowImageSection {
           VStack(alignment: .leading, spacing: 10) {
             if usesProgressiveOnboarding {
-              ComposeStepTitle(number: 2, title: "Add an image", note: "Optional, free while in beta")
+              ComposeStepTitle(
+                number: 2,
+                title: "Add an image",
+                note: proImageEntitlements.isImageAttachmentUnlocked ? "Optional" : "Optional Pro feature"
+              )
             }
 
             ImageAttachmentPicker(
               selectedImage: selectedImagePreview,
               isPreparing: isPreparingImage,
-              showsStandaloneBetaNote: !usesProgressiveOnboarding,
+              isUnlocked: proImageEntitlements.isImageAttachmentUnlocked,
+              showsStandaloneNote: !usesProgressiveOnboarding,
               onClear: {
                 selectedPhotoItem = nil
                 selectedImageData = nil
@@ -1198,6 +1210,11 @@ private struct ComposeSealedMessageView: View {
                 createdPlaintext = nil
                 createdImageData = nil
                 errorMessage = nil
+                softHaptic()
+              },
+              onRequestUnlock: {
+                focusedField = nil
+                isShowingImagePaywall = true
                 softHaptic()
               },
               selection: $selectedPhotoItem
@@ -1275,6 +1292,11 @@ private struct ComposeSealedMessageView: View {
       }
     }
 #endif
+    .sheet(isPresented: $isShowingImagePaywall) {
+      ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
     .onDisappear {
       onboardingRevealTask?.cancel()
     }
@@ -1292,6 +1314,14 @@ private struct ComposeSealedMessageView: View {
 #if !APPCLIP
   private func prepareSelectedImage(_ item: PhotosPickerItem?) async {
     guard let item else {
+      return
+    }
+
+    guard proImageEntitlements.isImageAttachmentUnlocked else {
+      selectedPhotoItem = nil
+      selectedImageData = nil
+      selectedImagePreview = nil
+      isShowingImagePaywall = true
       return
     }
 
@@ -1331,6 +1361,12 @@ private struct ComposeSealedMessageView: View {
     let pinToSeal = pin
     let imageDataToSeal = selectedImageData
     let animationDuration: TimeInterval = 0.64
+
+    if imageDataToSeal != nil && !proImageEntitlements.isImageAttachmentUnlocked {
+      isShowingImagePaywall = true
+      warningHaptic()
+      return
+    }
 
     isCreating = true
     createdMessage = nil
@@ -1533,8 +1569,10 @@ private extension UIView {
 private struct ImageAttachmentPicker: View {
   let selectedImage: UIImage?
   let isPreparing: Bool
-  let showsStandaloneBetaNote: Bool
+  let isUnlocked: Bool
+  let showsStandaloneNote: Bool
   let onClear: () -> Void
+  let onRequestUnlock: () -> Void
   @Binding var selection: PhotosPickerItem?
 
   var body: some View {
@@ -1583,21 +1621,29 @@ private struct ImageAttachmentPicker: View {
         .padding(12)
         .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
-      } else {
+      } else if isUnlocked {
         PhotosPicker(selection: $selection, matching: .images, photoLibrary: .shared()) {
           Label(isPreparing ? "Preparing image..." : "Attach encrypted image", systemImage: isPreparing ? "hourglass" : "photo.badge.plus")
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(SecondaryActionButtonStyle())
         .disabled(isPreparing)
+      } else {
+        Button {
+          onRequestUnlock()
+        } label: {
+          Label("Upgrade to Pro Images", systemImage: "lock.fill")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(SecondaryActionButtonStyle())
       }
 
-      if showsStandaloneBetaNote {
-        Text("*free while in beta")
+      if showsStandaloneNote {
+        Text(isUnlocked ? "One encrypted image per sealed message." : "Images are now a Pro feature. Text messages and receiving images stay free.")
           .font(.system(size: 12, weight: .medium, design: .rounded))
           .foregroundStyle(Color.white.opacity(0.42))
           .padding(.leading, 2)
-          .accessibilityLabel("Free while in beta")
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
   }
@@ -2454,6 +2500,7 @@ private enum OnboardingStep {
 
 private struct OnboardingView: View {
   @ObservedObject var store: SealedMessageStore
+  @ObservedObject var proImageEntitlements: ProImageEntitlementStore
   let onComplete: () -> Void
 
   @State private var step: OnboardingStep = .reader
@@ -2560,6 +2607,7 @@ private struct OnboardingView: View {
 
             ComposeSealedMessageView(
               store: store,
+              proImageEntitlements: proImageEntitlements,
               title: "Create",
               initialMessage: "",
               completionActionTitle: "Complete onboarding",

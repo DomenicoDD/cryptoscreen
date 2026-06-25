@@ -6,6 +6,7 @@ struct MessagesComposeView: View {
   @ObservedObject var context: MessagesComposeContext
 
   @AppStorage("cryptoscreen.messages.sharePINSeparately") private var sharePINSeparately = false
+  @StateObject private var proImageEntitlements = ProImageEntitlementStore()
   @State private var message = ""
   @State private var pin = ""
   @State private var selectedPhotoItem: PhotosPickerItem?
@@ -15,6 +16,7 @@ struct MessagesComposeView: View {
   @State private var isInserting = false
   @State private var createdMessage: CreatedSealedMessage?
   @State private var statusText: String?
+  @State private var isShowingImagePaywall = false
   @FocusState private var focusedField: Field?
 
   private let sender = MessagesSenderService.production
@@ -23,10 +25,20 @@ struct MessagesComposeView: View {
     SealedMessageCrypto.normalizePIN(pin)
   }
 
+  private var messageByteCount: Int {
+    message.utf8.count
+  }
+
+  private var isMessageWithinSizeLimit: Bool {
+    messageByteCount <= SealedMessageCrypto.maxMessagePlaintextByteCount
+  }
+
   private var canSeal: Bool {
     !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+    isMessageWithinSizeLimit &&
     normalizedPIN.count == SealedMessageCrypto.pinLength &&
     context.canInsertMessages &&
+    (selectedImageData == nil || proImageEntitlements.isImageAttachmentUnlocked) &&
     !isSealing
   }
 
@@ -69,6 +81,11 @@ struct MessagesComposeView: View {
       .task(id: selectedPhotoItem) {
         await loadSelectedImage()
       }
+      .sheet(isPresented: $isShowingImagePaywall) {
+        ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
+          .presentationDetents([.medium, .large])
+          .presentationDragIndicator(.visible)
+      }
     }
   }
 
@@ -107,6 +124,23 @@ struct MessagesComposeView: View {
         .onChange(of: message) { _, _ in
           createdMessage = nil
         }
+
+      HStack(spacing: 8) {
+        if !isMessageWithinSizeLimit {
+          Text("Message is too long")
+            .foregroundStyle(.orange)
+            .lineLimit(1)
+        }
+
+        Spacer()
+
+        Text("\(message.count) characters | \(messageByteCount.formatted())/\(SealedMessageCrypto.maxMessagePlaintextByteCount.formatted()) bytes")
+          .monospacedDigit()
+          .lineLimit(1)
+          .minimumScaleFactor(0.8)
+      }
+      .font(.caption2)
+      .foregroundStyle(.secondary)
     }
   }
 
@@ -147,14 +181,35 @@ struct MessagesComposeView: View {
         .background(Color.white.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
       } else {
-        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-          Label("Add encrypted image", systemImage: "photo.badge.plus")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color.white.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        if proImageEntitlements.isImageAttachmentUnlocked {
+          PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+            Label("Add encrypted image", systemImage: "photo.badge.plus")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.white)
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 12)
+              .background(Color.white.opacity(0.08))
+              .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+          }
+        } else {
+          Button {
+            focusedField = nil
+            isShowingImagePaywall = true
+          } label: {
+            Label("Upgrade to Pro Images", systemImage: "lock.fill")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.white)
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 12)
+              .background(Color.white.opacity(0.08))
+              .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+          }
+          .buttonStyle(.plain)
+
+          Text("Images are now a Pro feature. Text messages and receiving images stay free.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
       }
     }
@@ -262,6 +317,16 @@ struct MessagesComposeView: View {
       return
     }
 
+    guard proImageEntitlements.isImageAttachmentUnlocked else {
+      await MainActor.run {
+        self.selectedPhotoItem = nil
+        selectedImageData = nil
+        selectedImagePreview = nil
+        isShowingImagePaywall = true
+      }
+      return
+    }
+
     do {
       guard let data = try await selectedPhotoItem.loadTransferable(type: Data.self) else {
         throw MessagesComposeViewError.invalidImage
@@ -285,6 +350,9 @@ struct MessagesComposeView: View {
 
   private func seal() async {
     guard canSeal else {
+      if selectedImageData != nil && !proImageEntitlements.isImageAttachmentUnlocked {
+        isShowingImagePaywall = true
+      }
       return
     }
 
