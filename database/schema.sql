@@ -59,9 +59,13 @@ $$;
 create table if not exists cryptoscreen.message_stats (
   id boolean primary key default true,
   shared_messages bigint not null default 0,
+  image_attachments_shared bigint not null default 0,
   updated_at timestamptz not null default now(),
   constraint message_stats_singleton_check check (id)
 );
+
+alter table cryptoscreen.message_stats
+  add column if not exists image_attachments_shared bigint not null default 0;
 
 create table if not exists cryptoscreen.sealed_message_attachments (
   id uuid primary key,
@@ -155,6 +159,24 @@ insert into cryptoscreen.message_stats (id, shared_messages)
 values (true, (select count(*) from cryptoscreen.sealed_messages))
 on conflict (id) do nothing;
 
+with image_messages as (
+  select message_id
+  from cryptoscreen.sealed_message_delivery_audit
+  where has_image_attachment
+  union
+  select message_id
+  from cryptoscreen.sealed_message_attachments
+  where attachment_type = 'image'
+)
+update cryptoscreen.message_stats
+set
+  image_attachments_shared = greatest(image_attachments_shared, (select count(*) from image_messages)),
+  updated_at = case
+    when image_attachments_shared < (select count(*) from image_messages) then now()
+    else updated_at
+  end
+where id = true;
+
 create or replace function cryptoscreen.record_sealed_message_shared()
 returns trigger
 language plpgsql
@@ -179,6 +201,31 @@ create trigger sealed_messages_record_shared
 after insert on cryptoscreen.sealed_messages
 for each row
 execute function cryptoscreen.record_sealed_message_shared();
+
+create or replace function cryptoscreen.record_image_attachment_shared()
+returns trigger
+language plpgsql
+security definer
+set search_path = cryptoscreen, pg_temp
+as $$
+begin
+  insert into cryptoscreen.message_stats (id, shared_messages, image_attachments_shared, updated_at)
+  values (true, 0, 1, now())
+  on conflict (id) do update
+  set
+    image_attachments_shared = cryptoscreen.message_stats.image_attachments_shared + 1,
+    updated_at = now();
+
+  return new;
+end;
+$$;
+
+drop trigger if exists sealed_message_attachments_record_shared on cryptoscreen.sealed_message_attachments;
+
+create trigger sealed_message_attachments_record_shared
+after insert on cryptoscreen.sealed_message_attachments
+for each row
+execute function cryptoscreen.record_image_attachment_shared();
 
 create or replace function cryptoscreen.record_sealed_message_delivery_audit()
 returns trigger
@@ -389,7 +436,7 @@ comment on column cryptoscreen.sealed_messages.retained is
   'Service-owned demo/review flag. Retained rows survive correct PIN reads, wrong PIN attempts, and expiry cleanup.';
 
 comment on table cryptoscreen.message_stats is
-  'Aggregate service counters. shared_messages is cumulative and contains no message content.';
+  'Aggregate service counters. shared_messages and image_attachments_shared are cumulative and contain no message content.';
 
 comment on table cryptoscreen.sealed_message_attachments is
   'Stores metadata for one encrypted image attachment per sealed message. R2 stores the ciphertext object; this table stores no plaintext and no raw file key.';

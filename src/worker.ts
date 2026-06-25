@@ -1,6 +1,6 @@
 /// <reference types="./worker-configuration" />
 
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 
 const MAX_REQUEST_BYTES = 128 * 1024;
 const MAX_CIPHERTEXT_BYTES = 64 * 1024;
@@ -120,8 +120,13 @@ type ReadSessionRow = {
 
 type MessageStats = {
   sharedMessages: number;
+  imageAttachmentsShared: number;
   updatedAt: string | null;
 };
+
+type SqlClient = NeonQueryFunction<false, false>;
+
+let messageStatsSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
@@ -273,12 +278,18 @@ async function stats(env: Env): Promise<Response> {
 
 async function getMessageStats(env: Env): Promise<MessageStats> {
   const sql = neon(env.DATABASE_URL);
+  await ensureMessageStatsSchema(sql);
+
   const rows = await sql`
     select
       coalesce(
         (select shared_messages from cryptoscreen.message_stats where id = true),
         0
       )::text as shared_messages,
+      coalesce(
+        (select image_attachments_shared from cryptoscreen.message_stats where id = true),
+        0
+      )::text as image_attachments_shared,
       (
         select updated_at::text
         from cryptoscreen.message_stats
@@ -287,6 +298,88 @@ async function getMessageStats(env: Env): Promise<MessageStats> {
   `;
 
   return parseMessageStatsRow(rows[0]);
+}
+
+async function ensureMessageStatsSchema(sql: SqlClient): Promise<void> {
+  if (!messageStatsSchemaReady) {
+    messageStatsSchemaReady = applyMessageStatsSchema(sql).catch((error) => {
+      messageStatsSchemaReady = null;
+      throw error;
+    });
+  }
+
+  await messageStatsSchemaReady;
+}
+
+async function applyMessageStatsSchema(sql: SqlClient): Promise<void> {
+  await sql`
+    alter table cryptoscreen.message_stats
+      add column if not exists image_attachments_shared bigint not null default 0
+  `;
+
+  await sql`
+    insert into cryptoscreen.message_stats (id, shared_messages, image_attachments_shared)
+    values (true, 0, 0)
+    on conflict (id) do nothing
+  `;
+
+  await sql`
+    create or replace function cryptoscreen.record_image_attachment_shared()
+    returns trigger
+    language plpgsql
+    security definer
+    set search_path = cryptoscreen, pg_temp
+    as $$
+    begin
+      insert into cryptoscreen.message_stats (id, shared_messages, image_attachments_shared, updated_at)
+      values (true, 0, 1, now())
+      on conflict (id) do update
+      set
+        image_attachments_shared = cryptoscreen.message_stats.image_attachments_shared + 1,
+        updated_at = now();
+
+      return new;
+    end;
+    $$
+  `;
+
+  await sql`
+    do $$
+    begin
+      create trigger sealed_message_attachments_record_shared
+      after insert on cryptoscreen.sealed_message_attachments
+      for each row
+      execute function cryptoscreen.record_image_attachment_shared();
+    exception
+      when duplicate_object then null;
+    end;
+    $$
+  `;
+
+  await sql`
+    with image_messages as (
+      select message_id
+      from cryptoscreen.sealed_message_delivery_audit
+      where has_image_attachment
+      union
+      select message_id
+      from cryptoscreen.sealed_message_attachments
+      where attachment_type = 'image'
+    ),
+    image_count as (
+      select count(*)::bigint as value
+      from image_messages
+    )
+    update cryptoscreen.message_stats
+    set
+      image_attachments_shared = greatest(image_attachments_shared, image_count.value),
+      updated_at = case
+        when image_attachments_shared < image_count.value then now()
+        else updated_at
+      end
+    from image_count
+    where id = true
+  `;
 }
 
 async function safeMessageStats(env: Env): Promise<MessageStats | null> {
@@ -1444,6 +1537,7 @@ function parseMessageStatsRow(value: unknown): MessageStats {
 
   return {
     sharedMessages: expectDatabaseCount(row.shared_messages, "shared_messages"),
+    imageAttachmentsShared: expectDatabaseCount(row.image_attachments_shared, "image_attachments_shared"),
     updatedAt: expectNullableDatabaseString(row.updated_at, "updated_at")
   };
 }
@@ -1612,6 +1706,7 @@ async function homePage(env: Env): Promise<string> {
   const links = siteLinks(env);
   const stats = await safeMessageStats(env);
   const sharedMessages = stats ? formatStatNumber(stats.sharedMessages) : "...";
+  const imageAttachmentsShared = stats ? formatStatNumber(stats.imageAttachmentsShared) : "...";
 
   return pageShell(
     "cryptoscreen",
@@ -1631,6 +1726,10 @@ async function homePage(env: Env): Promise<string> {
             <div class="stat-item">
               <span class="stat-value" data-shared-messages aria-live="polite">${sharedMessages}</span>
               <span class="stat-label">messages shared</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" data-image-attachments-shared aria-live="polite">${imageAttachmentsShared}</span>
+              <span class="stat-label">images shared</span>
             </div>
             <div class="stat-item">
               <span class="stat-value">1</span>
@@ -2132,7 +2231,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       }
       .stat-strip {
         display: grid;
-        grid-template-columns: repeat(3, minmax(116px, max-content));
+        grid-template-columns: repeat(4, minmax(116px, max-content));
         gap: 14px 26px;
         margin-top: 28px;
       }
@@ -2410,7 +2509,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         .hero-copy { padding: 24px; }
         .stat-strip {
           gap: 12px;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .stat-item {
           min-width: 0;
@@ -2498,8 +2597,9 @@ function siteBaseUrl(env: Env): URL {
 function homeStatsScript(): string {
   return `<script>
 (() => {
-  const value = document.querySelector("[data-shared-messages]");
-  if (!value) return;
+  const sharedMessagesValue = document.querySelector("[data-shared-messages]");
+  const imageAttachmentsSharedValue = document.querySelector("[data-image-attachments-shared]");
+  if (!sharedMessagesValue && !imageAttachmentsSharedValue) return;
 
   const format = (raw) => {
     const count = Number(raw);
@@ -2515,8 +2615,14 @@ function homeStatsScript(): string {
       });
       if (!response.ok) return;
       const data = await response.json();
-      const formatted = format(data.sharedMessages);
-      if (formatted) value.textContent = formatted;
+      const formattedSharedMessages = format(data.sharedMessages);
+      if (formattedSharedMessages && sharedMessagesValue) {
+        sharedMessagesValue.textContent = formattedSharedMessages;
+      }
+      const formattedImageAttachmentsShared = format(data.imageAttachmentsShared);
+      if (formattedImageAttachmentsShared && imageAttachmentsSharedValue) {
+        imageAttachmentsSharedValue.textContent = formattedImageAttachmentsShared;
+      }
     } catch {
       // Leave the server-rendered count in place.
     }
