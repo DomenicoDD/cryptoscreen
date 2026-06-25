@@ -1119,15 +1119,28 @@ private struct ComposeSealedMessageView: View {
             softHaptic()
           }
 
-          TextEditor(text: $message)
-            .font(.system(size: 16, weight: .regular, design: .rounded))
-            .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-            .scrollContentBackground(.hidden)
-            .focused($focusedField, equals: .message)
-            .frame(minHeight: 146)
-            .padding(12)
-            .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+          ZStack(alignment: .bottomTrailing) {
+            TextEditor(text: $message)
+              .font(.system(size: 16, weight: .regular, design: .rounded))
+              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .scrollContentBackground(.hidden)
+              .focused($focusedField, equals: .message)
+              .frame(minHeight: 146)
+              .padding(.horizontal, 12)
+              .padding(.top, 12)
+              .padding(.bottom, 30)
+
+            Text("\(message.count)/\(maxMessageCharacterCount)")
+              .font(.system(size: 11, weight: .semibold, design: .rounded))
+              .foregroundStyle(Color.white.opacity(message.count > maxMessageCharacterCount - 500 ? 0.68 : 0.38))
+              .monospacedDigit()
+              .padding(.horizontal, 8)
+              .padding(.vertical, 5)
+              .background(Color(red: 0.045, green: 0.047, blue: 0.043).opacity(0.82), in: Capsule())
+              .padding(10)
+          }
+          .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
+          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
         }
 
 #if !APPCLIP
@@ -1145,7 +1158,6 @@ private struct ComposeSealedMessageView: View {
               selectedImage: selectedImagePreview,
               isPreparing: isPreparingImage,
               isUnlocked: proImageEntitlements.isImageAttachmentUnlocked,
-              showsStandaloneNote: !usesProgressiveOnboarding,
               onClear: {
                 selectedPhotoItem = nil
                 selectedImageData = nil
@@ -1238,7 +1250,7 @@ private struct ComposeSealedMessageView: View {
 #endif
     .sheet(isPresented: $isShowingImagePaywall) {
       ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
     .onDisappear {
@@ -1248,8 +1260,12 @@ private struct ComposeSealedMessageView: View {
       ToolbarItemGroup(placement: .keyboard) {
         Spacer()
 
-        Button("Done") {
+        Button {
           focusedField = nil
+        } label: {
+          Text("Done")
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
         }
       }
     }
@@ -1514,7 +1530,6 @@ private struct ImageAttachmentPicker: View {
   let selectedImage: UIImage?
   let isPreparing: Bool
   let isUnlocked: Bool
-  let showsStandaloneNote: Bool
   let onClear: () -> Void
   let onRequestUnlock: () -> Void
   @Binding var selection: PhotosPickerItem?
@@ -1580,14 +1595,6 @@ private struct ImageAttachmentPicker: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(SecondaryActionButtonStyle())
-      }
-
-      if showsStandaloneNote {
-        Text(isUnlocked ? "One encrypted image per sealed message." : "Images are now a Pro feature. Text messages and receiving images stay free.")
-          .font(.system(size: 12, weight: .medium, design: .rounded))
-          .foregroundStyle(Color.white.opacity(0.42))
-          .padding(.leading, 2)
-          .fixedSize(horizontal: false, vertical: true)
       }
     }
   }

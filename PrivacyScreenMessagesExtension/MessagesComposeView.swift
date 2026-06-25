@@ -83,7 +83,7 @@ struct MessagesComposeView: View {
       }
       .sheet(isPresented: $isShowingImagePaywall) {
         ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
-          .presentationDetents([.medium, .large])
+          .presentationDetents([.large])
           .presentationDragIndicator(.visible)
       }
     }
@@ -206,10 +206,6 @@ struct MessagesComposeView: View {
           }
           .buttonStyle(.plain)
 
-          Text("Images are now a Pro feature. Text messages and receiving images stay free.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
         }
       }
     }
