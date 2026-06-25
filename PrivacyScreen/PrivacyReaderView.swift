@@ -33,6 +33,7 @@ struct PrivacyReaderView: View {
   @State private var didDismissHandPlacementGuide = false
   @State private var didReveal = false
   @State private var didScroll = false
+  @State private var pendingExternalLink: PendingExternalLink?
 
   init(
     message: String = sampleMessage,
@@ -89,6 +90,7 @@ struct PrivacyReaderView: View {
               ForEach(lines) { line in
                 ScrambleLineText(
                   text: line.text,
+                  attributedText: line.attributedText,
                   lineID: line.id,
                   fontSize: fontSize,
                   isRevealed: revealActive && revealedLineIDs.contains(line.id),
@@ -158,6 +160,21 @@ struct PrivacyReaderView: View {
       }
       .coordinateSpace(name: "readerScreen")
       .textSelection(.disabled)
+      .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
+      .environment(\.openURL, OpenURLAction { url in
+        pendingExternalLink = PendingExternalLink(url: url)
+        return .handled
+      })
+      .alert(item: $pendingExternalLink) { link in
+        Alert(
+          title: Text("This message is consumed"),
+          message: Text("If you follow the link now, you won't be able to see the message again."),
+          primaryButton: .default(Text("Continue to link")) {
+            UIApplication.shared.open(link.url)
+          },
+          secondaryButton: .cancel(Text("Keep reading"))
+        )
+      }
       .simultaneousGesture(
         DragGesture(minimumDistance: 0, coordinateSpace: .named("readerScreen"))
           .onChanged { value in
@@ -533,6 +550,7 @@ final class RevealTouchCaptureUIView: UIView {
 
 private struct ScrambleLineText: View {
   let text: String
+  let attributedText: AttributedString
   let lineID: Int
   let fontSize: CGFloat
   let isRevealed: Bool
@@ -558,7 +576,7 @@ private struct ScrambleLineText: View {
   }
 
   var body: some View {
-    Text(visibleText)
+    lineText
       .font(.system(size: fontSize, weight: isActive ? .semibold : .regular, design: .monospaced))
       .foregroundStyle(isRevealed ? Color(red: 0.965, green: 0.965, blue: 0.92) : Color.white.opacity(0.34))
       .lineLimit(1)
@@ -579,6 +597,15 @@ private struct ScrambleLineText: View {
       .onChange(of: text) { _, _ in
         restartAnimation()
       }
+  }
+
+  @ViewBuilder
+  private var lineText: some View {
+    if isRevealed && visibleText == text {
+      Text(attributedText)
+    } else {
+      Text(visibleText)
+    }
   }
 
   private func restartAnimation() {
@@ -758,6 +785,11 @@ private struct ScrollTeachingPill: View {
 private struct LineFrame: Equatable {
   let id: Int
   let frame: CGRect
+}
+
+private struct PendingExternalLink: Identifiable {
+  let id = UUID()
+  let url: URL
 }
 
 private struct LineFramePreferenceKey: PreferenceKey {
