@@ -482,8 +482,8 @@ struct SealedMessageRootView: View {
         .presentationDetents([.medium, .large])
     }
     .sheet(isPresented: $isShowingPrivacySettings) {
-      PrivacySettingsView()
-        .presentationDetents([.medium])
+      PrivacySettingsView(proImageEntitlements: proImageEntitlements)
+        .presentationDetents([.large])
     }
 #if !APPCLIP
     .sheet(isPresented: $isShowingOnboarding) {
@@ -595,7 +595,13 @@ private struct HeaderView: View {
 
 private struct PrivacySettingsView: View {
   @Environment(\.dismiss) private var dismiss
+  @ObservedObject var proImageEntitlements: ProImageEntitlementStore
   @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
+#if !APPCLIP
+  @State private var isShowingProPaywall = false
+  @State private var isOpeningSubscriptionManagement = false
+  @State private var subscriptionManagementError: String?
+#endif
 
   var body: some View {
     ZStack {
@@ -654,13 +660,130 @@ private struct PrivacySettingsView: View {
         .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
 
+#if !APPCLIP
+        VStack(alignment: .leading, spacing: 12) {
+          HStack(alignment: .top, spacing: 12) {
+            Image(systemName: proImageEntitlements.isImageAttachmentUnlocked ? "checkmark.seal.fill" : "photo.badge.plus")
+              .font(.system(size: 18, weight: .semibold))
+              .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70))
+              .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 5) {
+              Text("Pro Images")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+
+              Text(proImageEntitlements.isImageAttachmentUnlocked ? "Image attachments are active on this Apple ID." : "Open the paywall to enable encrypted image attachments.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.58))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+
+          VStack(spacing: 10) {
+            Button {
+              isShowingProPaywall = true
+              softHaptic()
+            } label: {
+              Label(proImageEntitlements.isImageAttachmentUnlocked ? "View Pro paywall" : "Open Pro paywall", systemImage: "sparkles")
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(SettingsActionButtonStyle())
+
+            Button {
+              Task {
+                await proImageEntitlements.restorePurchases()
+              }
+            } label: {
+              Label("Restore purchase", systemImage: "arrow.clockwise")
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(SettingsActionButtonStyle())
+            .disabled(proImageEntitlements.isLoading || proImageEntitlements.isPurchasing)
+
+            Button {
+              openSubscriptionManagement()
+            } label: {
+              Label(isOpeningSubscriptionManagement ? "Opening..." : "Manage or cancel subscription", systemImage: "creditcard")
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(SettingsActionButtonStyle())
+            .disabled(isOpeningSubscriptionManagement)
+          }
+
+          if let errorMessage = proImageEntitlements.errorMessage ?? subscriptionManagementError {
+            Text(errorMessage)
+              .font(.system(size: 12, weight: .medium, design: .rounded))
+              .foregroundStyle(Color(red: 1.0, green: 0.68, blue: 0.38))
+              .fixedSize(horizontal: false, vertical: true)
+          }
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+#endif
+
         Spacer()
       }
       .padding(.horizontal, 20)
       .padding(.top, 22)
     }
+#if !APPCLIP
+    .sheet(isPresented: $isShowingProPaywall) {
+      ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+    .task {
+      await proImageEntitlements.refresh()
+    }
+#endif
+  }
+
+#if !APPCLIP
+  private func openSubscriptionManagement() {
+    guard let scene = UIApplication.shared.connectedScenes
+      .compactMap({ $0 as? UIWindowScene })
+      .first(where: { $0.activationState == .foregroundActive }) else {
+      subscriptionManagementError = "Could not open subscription settings."
+      return
+    }
+
+    subscriptionManagementError = nil
+    isOpeningSubscriptionManagement = true
+
+    Task {
+      defer {
+        isOpeningSubscriptionManagement = false
+      }
+
+      do {
+        try await AppStore.showManageSubscriptions(in: scene)
+        await proImageEntitlements.refresh()
+      } catch {
+        subscriptionManagementError = "Could not open subscription settings."
+      }
+    }
+  }
+#endif
+}
+
+#if !APPCLIP
+private struct SettingsActionButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.system(size: 14, weight: .semibold, design: .rounded))
+      .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+      .padding(.vertical, 12)
+      .padding(.horizontal, 12)
+      .background(
+        configuration.isPressed ? Color.white.opacity(0.14) : Color.white.opacity(0.08),
+        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+      )
+      .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
   }
 }
+#endif
 
 private struct SentMessagesView: View {
   @Environment(\.dismiss) private var dismiss
