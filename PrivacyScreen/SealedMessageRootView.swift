@@ -7,7 +7,6 @@ private let defaultComposeMessage = "Meet me by the north entrance after the sec
 private let sealedMessageShareSubject = "cryptoscreen sealed note"
 private let sealedMessageShareWarning = "There is an encrypted self-destroying note waiting for you. Beware: if you take a screenshot, the message will be destroyed."
 private let maxMessageCharacterCount = 10_000
-private let maxFeedbackCharacterCount = 2_000
 private let proImageAttachmentsEnabled = true
 private let demoCardImageAssetName = "DemoCard"
 private let sentMessagesStorageKey = "cryptoscreen.sentMessages"
@@ -278,8 +277,6 @@ final class SealedMessageStore: ObservableObject {
   func submitFeedback(rating: Int, message: String) async throws {
     let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
     let buildNumber = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-    let device = UIDevice.current
-    let deviceInfo = "\(device.model), \(device.systemName) \(device.systemVersion)"
 
     try await api.submitFeedback(
       rating: rating,
@@ -287,7 +284,7 @@ final class SealedMessageStore: ObservableObject {
       appVersion: appVersion,
       buildNumber: buildNumber,
       platform: "iOS",
-      device: deviceInfo,
+      device: nil,
       timestamp: Date()
     )
   }
@@ -385,6 +382,7 @@ struct SealedMessageRootView: View {
   @State private var isShowingOnboarding = false
   @State private var isShowingSentMessages = false
   @State private var isShowingPrivacySettings = false
+  @State private var isShowingReviewPrompt = false
 
   var body: some View {
     mainInterface
@@ -444,6 +442,9 @@ struct SealedMessageRootView: View {
                   proImageEntitlements: proImageEntitlements,
                   onCreatedLink: { link in
                     incomingLink = link.absoluteString
+                    if ReviewPromptTracker.recordSuccessfulSend() {
+                      isShowingReviewPrompt = true
+                    }
                   },
                   onTestMessage: { message, plaintext, imageData in
                     senderPreviewSession = SenderPreviewSession(
@@ -482,8 +483,20 @@ struct SealedMessageRootView: View {
         .presentationDetents([.medium, .large])
     }
     .sheet(isPresented: $isShowingPrivacySettings) {
-      PrivacySettingsView(proImageEntitlements: proImageEntitlements)
+      PrivacySettingsView(store: store, proImageEntitlements: proImageEntitlements)
         .presentationDetents([.large])
+    }
+    .sheet(isPresented: $isShowingReviewPrompt) {
+      CryptoscreenReviewPrompt(
+        sendFeedback: { feedback in
+          try await store.submitFeedback(rating: 2, message: feedback)
+        },
+        onDone: {
+          isShowingReviewPrompt = false
+        }
+      )
+      .presentationDetents([.medium, .large])
+      .presentationDragIndicator(.visible)
     }
 #if !APPCLIP
     .sheet(isPresented: $isShowingOnboarding) {
@@ -595,8 +608,10 @@ private struct HeaderView: View {
 
 private struct PrivacySettingsView: View {
   @Environment(\.dismiss) private var dismiss
+  @ObservedObject var store: SealedMessageStore
   @ObservedObject var proImageEntitlements: ProImageEntitlementStore
   @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
+  @State private var isShowingAnonymousFeedback = false
 #if !APPCLIP
   @State private var isShowingProPaywall = false
   @State private var isOpeningSubscriptionManagement = false
@@ -655,6 +670,38 @@ private struct PrivacySettingsView: View {
             .font(.system(size: 12, weight: .medium, design: .rounded))
             .foregroundStyle(Color.white.opacity(0.48))
             .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+
+        VStack(alignment: .leading, spacing: 12) {
+          HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "paperplane.fill")
+              .font(.system(size: 18, weight: .semibold))
+              .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70))
+              .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 5) {
+              Text("Anonymous feedback")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+
+              Text("Write a private note to the developer. No account, sealed link, PIN, or message content is attached.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.58))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+
+          Button {
+            isShowingAnonymousFeedback = true
+            softHaptic()
+          } label: {
+            Label("Send anonymous feedback", systemImage: "bubble.left.and.text.bubble.right.fill")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(SettingsActionButtonStyle())
         }
         .padding(16)
         .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
@@ -728,6 +775,19 @@ private struct PrivacySettingsView: View {
       .padding(.horizontal, 20)
       .padding(.top, 22)
     }
+    .sheet(isPresented: $isShowingAnonymousFeedback) {
+      CryptoscreenReviewPrompt(
+        startsWithFeedback: true,
+        sendFeedback: { feedback in
+          try await store.submitFeedback(rating: 2, message: feedback)
+        },
+        onDone: {
+          isShowingAnonymousFeedback = false
+        }
+      )
+      .presentationDetents([.medium, .large])
+      .presentationDragIndicator(.visible)
+    }
 #if !APPCLIP
     .sheet(isPresented: $isShowingProPaywall) {
       ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
@@ -768,7 +828,6 @@ private struct PrivacySettingsView: View {
 #endif
 }
 
-#if !APPCLIP
 private struct SettingsActionButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
@@ -783,7 +842,6 @@ private struct SettingsActionButtonStyle: ButtonStyle {
       .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
   }
 }
-#endif
 
 private struct SentMessagesView: View {
   @Environment(\.dismiss) private var dismiss
@@ -2584,7 +2642,6 @@ private struct OnboardingView: View {
   @State private var didMoveImage = false
   @State private var showsOnboardingImage = true
   @State private var senderPreviewSession: SenderPreviewSession?
-  @State private var showsReviewPrompt = false
 
   private var canAdvanceFromReader: Bool {
     didRevealMessage && didScrollMessage
@@ -2695,7 +2752,7 @@ private struct OnboardingView: View {
                 )
               },
               onCompletion: {
-                showsReviewPrompt = true
+                onComplete()
               }
             )
           }
@@ -2707,208 +2764,6 @@ private struct OnboardingView: View {
     .textSelection(.disabled)
     .fullScreenCover(item: $senderPreviewSession) { session in
       SenderPreviewSessionView(message: session.message, imageData: session.imageData, link: session.link)
-    }
-    .sheet(isPresented: $showsReviewPrompt) {
-      OnboardingReviewPrompt(store: store) {
-        showsReviewPrompt = false
-        onComplete()
-      }
-      .presentationDetents([.medium, .large])
-      .interactiveDismissDisabled()
-    }
-  }
-}
-
-private struct OnboardingReviewPrompt: View {
-  @Environment(\.requestReview) private var requestReview
-
-  @ObservedObject var store: SealedMessageStore
-  let onDone: () -> Void
-
-  @State private var rating = 0
-  @State private var step: OnboardingReviewStep = .rating
-  @State private var reviewText = ""
-  @State private var statusText: String?
-  @State private var didFailSending = false
-  @State private var isSendingFeedback = false
-
-  private var trimmedFeedback: String {
-    reviewText.trimmingCharacters(in: .whitespacesAndNewlines)
-  }
-
-  var body: some View {
-    ZStack {
-      Color(red: 0.045, green: 0.047, blue: 0.043)
-        .ignoresSafeArea()
-
-      VStack(alignment: .leading, spacing: 22) {
-        VStack(alignment: .leading, spacing: 8) {
-          Text(step.title)
-            .font(.system(size: 24, weight: .semibold, design: .rounded))
-            .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-
-          Text(step.subtitle)
-            .font(.system(size: 14, weight: .medium, design: .rounded))
-            .foregroundStyle(Color.white.opacity(0.62))
-            .fixedSize(horizontal: false, vertical: true)
-        }
-
-        if step == .feedback {
-          TextEditor(text: $reviewText)
-            .font(.system(size: 15, weight: .regular, design: .rounded))
-            .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-            .scrollContentBackground(.hidden)
-            .frame(minHeight: 132)
-            .padding(12)
-            .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
-
-          if let statusText {
-            StatusLine(
-              text: statusText,
-              systemImage: didFailSending ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
-              tint: didFailSending ? Color(red: 1.0, green: 0.68, blue: 0.38) : Color(red: 0.50, green: 0.92, blue: 0.68)
-            )
-          }
-
-          HStack(spacing: 10) {
-            Button {
-              onDone()
-              softHaptic()
-            } label: {
-              Text("Skip")
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(SecondaryActionButtonStyle())
-
-            if didFailSending {
-              Button {
-                onDone()
-                softHaptic()
-              } label: {
-                Label("Continue", systemImage: "arrow.right")
-                  .frame(maxWidth: .infinity)
-              }
-              .buttonStyle(PrimaryActionButtonStyle())
-            } else {
-              Button {
-                Task {
-                  await sendFeedback()
-                }
-              } label: {
-                Label(isSendingFeedback ? "Sending..." : "Send feedback", systemImage: isSendingFeedback ? "hourglass" : "paperplane.fill")
-                  .frame(maxWidth: .infinity)
-              }
-              .buttonStyle(PrimaryActionButtonStyle())
-              .disabled(trimmedFeedback.isEmpty || isSendingFeedback)
-            }
-          }
-        } else {
-          HStack(spacing: 10) {
-            ForEach(1...5, id: \.self) { star in
-              Button {
-                rating = star
-                softHaptic()
-              } label: {
-                Image(systemName: star <= rating ? "star.fill" : "star")
-                  .font(.system(size: 30, weight: .semibold))
-                  .foregroundStyle(star <= rating ? Color(red: 0.78, green: 0.96, blue: 0.86) : Color.white.opacity(0.30))
-                  .frame(maxWidth: .infinity, minHeight: 54)
-              }
-              .buttonStyle(.plain)
-              .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
-            }
-          }
-
-          Button {
-            continueFromRating()
-          } label: {
-            Label("Continue", systemImage: "arrow.right")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(PrimaryActionButtonStyle())
-          .disabled(rating == 0)
-        }
-      }
-      .padding(24)
-    }
-    .onAppear {
-      reviewText = ""
-      statusText = nil
-      didFailSending = false
-    }
-    .onChange(of: reviewText) { _, newValue in
-      if newValue.count > maxFeedbackCharacterCount {
-        reviewText = String(newValue.prefix(maxFeedbackCharacterCount))
-      }
-    }
-  }
-
-  private func continueFromRating() {
-    guard rating > 0 else {
-      return
-    }
-
-    softHaptic()
-
-    if rating >= 4 {
-      requestReview()
-      onDone()
-      return
-    }
-
-    withAnimation(.easeInOut(duration: 0.2)) {
-      reviewText = ""
-      statusText = nil
-      didFailSending = false
-      step = .feedback
-    }
-  }
-
-  private func sendFeedback() async {
-    guard !trimmedFeedback.isEmpty, !isSendingFeedback else {
-      return
-    }
-
-    isSendingFeedback = true
-    defer {
-      isSendingFeedback = false
-    }
-
-    do {
-      try await store.submitFeedback(rating: rating, message: trimmedFeedback)
-      statusText = "Thanks. That helps."
-      didFailSending = false
-      softHaptic()
-      try? await Task.sleep(nanoseconds: 900_000_000)
-      onDone()
-    } catch {
-      statusText = "Couldn't send feedback right now."
-      didFailSending = true
-      warningHaptic()
-    }
-  }
-}
-
-private enum OnboardingReviewStep {
-  case rating
-  case feedback
-
-  var title: String {
-    switch self {
-    case .rating:
-      return "How did it feel?"
-    case .feedback:
-      return "What could be better?"
-    }
-  }
-
-  var subtitle: String {
-    switch self {
-    case .rating:
-      return "Tap a star to rate the onboarding."
-    case .feedback:
-      return "Your feedback is private and helps improve cryptoscreen."
     }
   }
 }

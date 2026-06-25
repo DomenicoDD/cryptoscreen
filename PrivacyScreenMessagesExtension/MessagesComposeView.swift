@@ -17,6 +17,7 @@ struct MessagesComposeView: View {
   @State private var createdMessage: CreatedSealedMessage?
   @State private var statusText: String?
   @State private var isShowingImagePaywall = false
+  @State private var isShowingReviewPrompt = false
   @FocusState private var focusedField: Field?
 
   private let sender = MessagesSenderService.production
@@ -85,6 +86,19 @@ struct MessagesComposeView: View {
         ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
           .presentationDetents([.large])
           .presentationDragIndicator(.visible)
+      }
+      .sheet(isPresented: $isShowingReviewPrompt) {
+        CryptoscreenReviewPrompt(
+          sendFeedback: { feedback in
+            try await sender.submitFeedback(message: feedback)
+          },
+          onDone: {
+            isShowingReviewPrompt = false
+            context.dismiss()
+          }
+        )
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
       }
     }
   }
@@ -375,11 +389,16 @@ struct MessagesComposeView: View {
         try await context.insertSealedMessage(
           createdMessage,
           includePINMessage: sharePINSeparately,
-          dismissAfterInsert: true
+          dismissAfterInsert: false
         )
+        let shouldShowReviewPrompt = ReviewPromptTracker.recordSuccessfulSend()
         await MainActor.run {
           statusText = sharePINSeparately ? "Sealed message and PIN inserted." : "Sealed message inserted."
+          isShowingReviewPrompt = shouldShowReviewPrompt
           isSealing = false
+          if !shouldShowReviewPrompt {
+            context.dismiss()
+          }
         }
       } catch {
         await MainActor.run {
@@ -404,11 +423,16 @@ struct MessagesComposeView: View {
       try await context.insertSealedMessage(
         createdMessage,
         includePINMessage: sharePINSeparately,
-        dismissAfterInsert: true
+        dismissAfterInsert: false
       )
+      let shouldShowReviewPrompt = ReviewPromptTracker.recordSuccessfulSend()
       await MainActor.run {
         statusText = sharePINSeparately ? "Sealed message and PIN inserted." : "Sealed message inserted."
+        isShowingReviewPrompt = shouldShowReviewPrompt
         isInserting = false
+        if !shouldShowReviewPrompt {
+          context.dismiss()
+        }
       }
     } catch {
       await MainActor.run {

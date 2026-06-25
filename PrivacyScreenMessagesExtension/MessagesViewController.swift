@@ -75,6 +75,10 @@ final class MessagesComposeContext: ObservableObject {
     selectedMessageLink = nil
   }
 
+  func dismiss() {
+    messagesViewController?.dismiss()
+  }
+
   func openInCryptoscreen(_ url: URL) async -> Bool {
     await withCheckedContinuation { continuation in
       messagesViewController?.extensionContext?.open(url) { [weak self] success in
@@ -114,7 +118,7 @@ final class MessagesComposeContext: ObservableObject {
     }
 
     if dismissAfterInsert {
-      messagesViewController?.dismiss()
+      dismiss()
     }
   }
 
@@ -125,7 +129,7 @@ final class MessagesComposeContext: ObservableObject {
     try await insertText("PIN: \(pin)", into: activeConversation)
 
     if dismissAfterInsert {
-      messagesViewController?.dismiss()
+      dismiss()
     }
   }
 

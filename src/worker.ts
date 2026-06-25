@@ -1340,21 +1340,20 @@ async function sendFeedbackEmail(feedback: FeedbackBody, env: Env): Promise<void
   await env.FEEDBACK_EMAIL_SENDER.send({
     from,
     to: recipient,
-    subject: `cryptoscreen onboarding feedback (${feedback.rating}/5)`,
+    subject: `cryptoscreen anonymous feedback (${feedback.rating}/5)`,
     text: feedbackEmailText(feedback)
   });
 }
 
 function feedbackEmailText(feedback: FeedbackBody): string {
   return [
-    "cryptoscreen onboarding feedback",
+    "cryptoscreen anonymous feedback",
     "",
     `Rating: ${feedback.rating}/5`,
     `Timestamp: ${feedback.timestamp}`,
     `App version: ${feedback.appVersion ?? "unknown"}`,
     `Build number: ${feedback.buildNumber ?? "unknown"}`,
     `Platform: ${feedback.platform ?? "unknown"}`,
-    `Device: ${feedback.device ?? "unknown"}`,
     "",
     "Feedback:",
     feedback.message
@@ -1850,7 +1849,7 @@ function privacyPage(env: Env): string {
         <p>To support one-time deletion and the optional sent-message list, the service keeps minimal delivery-status metadata for a message id: whether the text was consumed, whether an encrypted image attachment existed, whether that image was consumed, whether the row expired or was destroyed, and whether a screenshot event was reported. This status metadata does not include plaintext, image plaintext, PINs, link secrets, sender identity, recipient identity, or contact data. Delivery-status metadata is deleted by scheduled cleanup after it has been inactive for about ${LINK_RETENTION_DAYS} days.</p>
         <p>Interaction status sharing is opt-in in the app's Privacy settings and works reciprocally. If it is off, the app does not send optional read or screenshot status and does not fetch or show detailed interaction status for messages you sent. If it is on, you can see detailed interaction status only when the reader also shared interaction status from their app. Screenshot reports contain only a generic screenshot event and timestamp for that message. Screenshot detection is best-effort: iOS reports normal screenshots after capture, modified clients can omit reporting, and external cameras cannot be detected.</p>
         <p>The service also keeps an aggregate count of how many sealed messages have been shared. That counter does not include message content, recipients, senders, or link secrets.</p>
-        <p>If you send feedback from inside the app, the service processes the rating, feedback text, app version/build, platform/device information, and timestamp to deliver that support request to the maintainer.</p>
+        <p>If you send feedback from inside the app, the service sends your written feedback anonymously to the maintainer with the app version/build, platform, rating, and timestamp. Feedback does not include your account, contacts, sender or recipient identity, sealed message content, image content, PINs, full links, or link secrets.</p>
         <h2>App Store data</h2>
         <p>Apple separately processes App Store downloads, crash diagnostics, reviews, and any App Store support interactions under Apple's own terms. This is Apple platform infrastructure, not a cryptoscreen tracking SDK.</p>
         <h2>Operational data</h2>

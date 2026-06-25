@@ -40,6 +40,27 @@ struct MessagesSenderService {
     )
   }
 
+  func submitFeedback(message: String) async throws {
+    let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    let buildNumber = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let body = MessagesSubmitFeedbackRequest(
+      rating: 2,
+      message: message,
+      appVersion: appVersion,
+      buildNumber: buildNumber,
+      platform: "iMessage",
+      device: nil,
+      timestamp: timestamp
+    )
+
+    let _: MessagesSubmitFeedbackResponse = try await send(
+      path: "/api/feedback",
+      method: "POST",
+      body: body
+    )
+  }
+
   private func uploadAttachment(messageID: UUID, attachment: SealedImageAttachmentUpload) async throws {
     guard let url = URL(string: "/api/messages/\(messageID.uuidString.lowercased())/attachment", relativeTo: baseURL)?.absoluteURL else {
       throw MessagesSenderServiceError.invalidResponse
@@ -110,6 +131,20 @@ private struct MessagesCreateMessageResponse: Decodable {
   let id: String
   let maxAttempts: Int
   let expiresAt: Date
+}
+
+private struct MessagesSubmitFeedbackRequest: Encodable {
+  let rating: Int
+  let message: String
+  let appVersion: String?
+  let buildNumber: String?
+  let platform: String?
+  let device: String?
+  let timestamp: String
+}
+
+private struct MessagesSubmitFeedbackResponse: Decodable {
+  let ok: Bool
 }
 
 private enum MessagesSenderServiceError: Error {
