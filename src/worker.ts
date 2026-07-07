@@ -2055,6 +2055,8 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
   const escapedTitle = escapeHtml(title);
   const description = "cryptoscreen seals one-time encrypted messages for private reading on iPhone.";
   const links = siteLinks(env);
+  const xHandle = xHandleFromUrl(links.xUrl);
+  const appleAppId = appleAppStoreId(env);
 
   return `<!doctype html>
 <html lang="en">
@@ -2070,6 +2072,11 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     <meta property="og:title" content="${escapedTitle}">
     <meta property="og:description" content="${escapeAttribute(description)}">
     <meta property="og:type" content="website">
+    <meta name="twitter:card" content="app">
+    <meta name="twitter:site" content="${escapeAttribute(xHandle)}">
+    <meta name="twitter:description" content="${escapeAttribute(description)}">
+    <meta name="twitter:app:name:iphone" content="cryptoscreen">
+    <meta name="twitter:app:id:iphone" content="${escapeAttribute(appleAppId)}">
     <title>${escapedTitle}</title>
     <style>
       @font-face {
@@ -2662,6 +2669,22 @@ function siteLinks(env: Env): {
     appStoreUrl: externalUrl(vars.APP_STORE_URL ?? "https://apps.apple.com/us/app/cryptoscreen/id6779173642"),
     xUrl: externalUrl(vars.X_PROFILE_URL ?? "https://x.com/DomenicoDD")
   };
+}
+
+function appleAppStoreId(env: Env): string {
+  const vars = env as unknown as Record<string, string | undefined>;
+  const value = vars.APPLE_APP_ID ?? "6779173642";
+  return /^[0-9]+$/.test(value) ? value : "6779173642";
+}
+
+function xHandleFromUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    const handle = url.pathname.split("/").filter(Boolean)[0] ?? "DomenicoDD";
+    return /^@?[A-Za-z0-9_]{1,15}$/.test(handle) ? `@${handle.replace(/^@/, "")}` : "@DomenicoDD";
+  } catch {
+    return "@DomenicoDD";
+  }
 }
 
 function externalUrl(value: string): string {
