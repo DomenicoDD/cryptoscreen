@@ -7,6 +7,21 @@ struct ReaderLine: Identifiable, Equatable {
 }
 
 enum TextLineWrapper {
+  static func attributedParagraph(_ text: String) -> AttributedString {
+    let blocks = markdownBlocks(in: text)
+    var output = AttributedString()
+
+    for (index, block) in blocks.enumerated() {
+      if index > 0 {
+        output += AttributedString("\n")
+      }
+
+      output += attributedString(for: block.firstPrefix + block.runs)
+    }
+
+    return output
+  }
+
   static func wrap(_ text: String, width: CGFloat, fontSize: CGFloat) -> [ReaderLine] {
     let usableWidth = max(width, 80)
     let font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)

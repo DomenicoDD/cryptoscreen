@@ -135,6 +135,7 @@ type SqlClient = NeonQueryFunction<false, false>;
 
 let messageStatsSchemaReady: Promise<void> | null = null;
 let readPolicySchemaReady: Promise<void> | null = null;
+let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
@@ -437,11 +438,97 @@ async function safeMessageStats(env: Env): Promise<MessageStats | null> {
 
 async function submitFeedback(request: Request, env: Env): Promise<Response> {
   const body = parseFeedbackBody(await readJson(request));
-  await sendFeedbackEmail(body, env);
+  const feedbackID = await storeFeedback(body, env);
+
+  try {
+    await sendFeedbackEmail(body, env, feedbackID);
+    await markFeedbackEmailNotified(feedbackID, env);
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: "error",
+      message: "Anonymous feedback email failed",
+      feedbackID,
+      error: describeError(error)
+    }));
+  }
 
   return jsonResponse({ ok: true }, 202, {
     "Cache-Control": "no-store"
   });
+}
+
+async function ensureFeedbackSchema(env: Env): Promise<void> {
+  if (!feedbackSchemaReady) {
+    const sql = neon(env.DATABASE_URL);
+    feedbackSchemaReady = applyFeedbackSchema(sql).catch((error) => {
+      feedbackSchemaReady = null;
+      throw error;
+    });
+  }
+
+  await feedbackSchemaReady;
+}
+
+async function applyFeedbackSchema(sql: SqlClient): Promise<void> {
+  await sql`
+    create table if not exists cryptoscreen.anonymous_feedback (
+      id uuid primary key,
+      rating smallint not null check (rating between 1 and 5),
+      message text not null check (char_length(message) between 1 and 2000),
+      app_version text,
+      build_number text,
+      platform text,
+      device text,
+      client_timestamp timestamptz not null,
+      email_notified_at timestamptz,
+      created_at timestamptz not null default now()
+    )
+  `;
+
+  await sql`
+    create index if not exists anonymous_feedback_created_at_idx
+      on cryptoscreen.anonymous_feedback (created_at desc)
+  `;
+}
+
+async function storeFeedback(feedback: FeedbackBody, env: Env): Promise<string> {
+  await ensureFeedbackSchema(env);
+
+  const id = crypto.randomUUID();
+  const sql = neon(env.DATABASE_URL);
+  await sql`
+    insert into cryptoscreen.anonymous_feedback (
+      id,
+      rating,
+      message,
+      app_version,
+      build_number,
+      platform,
+      device,
+      client_timestamp
+    )
+    values (
+      ${id}::uuid,
+      ${feedback.rating},
+      ${feedback.message},
+      ${feedback.appVersion ?? null},
+      ${feedback.buildNumber ?? null},
+      ${feedback.platform ?? null},
+      ${feedback.device ?? null},
+      ${feedback.timestamp}::timestamptz
+    )
+  `;
+
+  return id;
+}
+
+async function markFeedbackEmailNotified(feedbackID: string, env: Env): Promise<void> {
+  const sql = neon(env.DATABASE_URL);
+  await sql`
+    update cryptoscreen.anonymous_feedback
+    set email_notified_at = now()
+    where id = ${feedbackID}::uuid
+  `;
 }
 
 async function createMessage(request: Request, env: Env): Promise<Response> {
@@ -1436,7 +1523,7 @@ async function pepperPinProof(rawPinProof: Uint8Array, env: Env): Promise<Uint8A
   return new Uint8Array(signature);
 }
 
-async function sendFeedbackEmail(feedback: FeedbackBody, env: Env): Promise<void> {
+async function sendFeedbackEmail(feedback: FeedbackBody, env: Env, feedbackID: string): Promise<void> {
   const recipient = env.FEEDBACK_EMAIL || env.SUPPORT_EMAIL;
   const from = env.FEEDBACK_FROM_EMAIL;
   if (!recipient || !from) {
@@ -1447,14 +1534,15 @@ async function sendFeedbackEmail(feedback: FeedbackBody, env: Env): Promise<void
     from,
     to: recipient,
     subject: `cryptoscreen anonymous feedback (${feedback.rating}/5)`,
-    text: feedbackEmailText(feedback)
+    text: feedbackEmailText(feedback, feedbackID)
   });
 }
 
-function feedbackEmailText(feedback: FeedbackBody): string {
+function feedbackEmailText(feedback: FeedbackBody, feedbackID: string): string {
   return [
     "cryptoscreen anonymous feedback",
     "",
+    `Feedback ID: ${feedbackID}`,
     `Rating: ${feedback.rating}/5`,
     `Timestamp: ${feedback.timestamp}`,
     `App version: ${feedback.appVersion ?? "unknown"}`,

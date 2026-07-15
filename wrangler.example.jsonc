@@ -43,13 +43,13 @@
     "X_PROFILE_URL": "https://x.com/DomenicoDD",
     "SUPPORT_EMAIL": "domenico@cryptoscreen.app",
     "FEEDBACK_EMAIL": "domenico@cryptoscreen.app",
-    "FEEDBACK_FROM_EMAIL": "feedback@cryptoscreen.app"
+    "FEEDBACK_FROM_EMAIL": "domenico@cryptoscreen.app"
   },
   "send_email": [
     {
       "name": "FEEDBACK_EMAIL_SENDER",
       "destination_address": "domenico@cryptoscreen.app",
-      "allowed_sender_addresses": ["feedback@cryptoscreen.app"]
+      "allowed_sender_addresses": ["domenico@cryptoscreen.app"]
     }
   ],
   "secrets": {

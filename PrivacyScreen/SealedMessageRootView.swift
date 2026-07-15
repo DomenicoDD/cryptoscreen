@@ -1,6 +1,5 @@
 import PhotosUI
 import SwiftUI
-import StoreKit
 import UIKit
 
 private let defaultComposeMessage = "Meet me by the north entrance after the second bell. Read this once, then let it burn."
@@ -14,13 +13,13 @@ private let interactionStatusSharingOptInKey = "cryptoscreen.reporting.screensho
 private let onboardingReaderMessage = """
 This is a cryptoscreen message.
 
-Everything starts as static. Cover the dotted target near the top of the display with your hand, then only the protected reading window becomes readable.
+Everything starts locked. Each paragraph opens only when you hold the eye control and slide with intent.
 
-Move the page slowly when you need the next line. Each line resolves only when it reaches the reveal window, then falls back into noise outside that area.
+Only the active paragraph becomes readable. Move down when you need the next section, and the note returns to static between steps.
 
 The message can be opened once. After it is read, it is deleted from the server. The PIN is never inside the link, so the sender must give it to the reader separately.
 
-Try covering the target, then scroll this guide until the last line reaches the reveal window.
+Try unlocking this paragraph, then move to the next one.
 """
 
 private func sealedMessageShareText(for link: URL) -> String {
@@ -383,7 +382,14 @@ struct SealedMessageRootView: View {
   @State private var isShowingOnboarding = false
   @State private var isShowingSentMessages = false
   @State private var isShowingPrivacySettings = false
+  @State private var isShowingAnonymousFeedback = false
   @State private var isShowingReviewPrompt = false
+#if !APPCLIP && (DEBUG || READER_LAB)
+  @State private var isShowingReaderLab = false
+#endif
+#if !APPCLIP
+  @State private var isShowingProPaywall = false
+#endif
 
   var body: some View {
     mainInterface
@@ -406,6 +412,19 @@ struct SealedMessageRootView: View {
             },
             onShowPrivacySettings: {
               isShowingPrivacySettings = true
+            },
+            onShowAnonymousFeedback: {
+              isShowingAnonymousFeedback = true
+            },
+            onShowReaderLab: {
+#if !APPCLIP && (DEBUG || READER_LAB)
+              isShowingReaderLab = true
+#endif
+            },
+            onShowPro: {
+#if !APPCLIP
+              isShowingProPaywall = true
+#endif
             }
           )
 
@@ -484,8 +503,21 @@ struct SealedMessageRootView: View {
         .presentationDetents([.medium, .large])
     }
     .sheet(isPresented: $isShowingPrivacySettings) {
-      PrivacySettingsView(store: store, proImageEntitlements: proImageEntitlements)
+      PrivacySettingsView()
         .presentationDetents([.large])
+    }
+    .sheet(isPresented: $isShowingAnonymousFeedback) {
+      CryptoscreenReviewPrompt(
+        startsWithFeedback: true,
+        sendFeedback: { feedback in
+          try await store.submitFeedback(rating: 2, message: feedback)
+        },
+        onDone: {
+          isShowingAnonymousFeedback = false
+        }
+      )
+      .presentationDetents([.medium, .large])
+      .presentationDragIndicator(.visible)
     }
     .sheet(isPresented: $isShowingReviewPrompt) {
       CryptoscreenReviewPrompt(
@@ -499,6 +531,18 @@ struct SealedMessageRootView: View {
       .presentationDetents([.medium, .large])
       .presentationDragIndicator(.visible)
     }
+#if !APPCLIP && (DEBUG || READER_LAB)
+    .fullScreenCover(isPresented: $isShowingReaderLab) {
+      ReaderInteractionPrototypeView()
+    }
+#endif
+#if !APPCLIP
+    .sheet(isPresented: $isShowingProPaywall) {
+      ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
+#endif
 #if !APPCLIP
     .sheet(isPresented: $isShowingOnboarding) {
       OnboardingView(store: store, proImageEntitlements: proImageEntitlements) {
@@ -538,6 +582,9 @@ private struct HeaderView: View {
   let onShowSentMessages: () -> Void
   let onShowOnboarding: () -> Void
   let onShowPrivacySettings: () -> Void
+  let onShowAnonymousFeedback: () -> Void
+  let onShowReaderLab: () -> Void
+  let onShowPro: () -> Void
 
   var body: some View {
     HStack(alignment: .center) {
@@ -568,19 +615,39 @@ private struct HeaderView: View {
         .accessibilityLabel("\(pendingCount) active sent messages")
 
         Menu {
+          Button {
+            onShowPrivacySettings()
+          } label: {
+            Label("Privacy Settings", systemImage: "hand.raised.fill")
+          }
+
+          Button {
+            onShowAnonymousFeedback()
+          } label: {
+            Label("Anonymous feedback", systemImage: "bubble.left.and.text.bubble.right.fill")
+          }
+
+#if !APPCLIP && (DEBUG || READER_LAB)
+          Button {
+            onShowReaderLab()
+          } label: {
+            Label("Reader Lab", systemImage: "sparkles")
+          }
+#endif
+
 #if !APPCLIP
+          Button {
+            onShowPro()
+          } label: {
+            Label("Go Pro", systemImage: "crown.fill")
+          }
+
           Button {
             onShowOnboarding()
           } label: {
             Label("Onboarding", systemImage: "play.rectangle")
           }
 #endif
-
-          Button {
-            onShowPrivacySettings()
-          } label: {
-            Label("Privacy settings", systemImage: "hand.raised.fill")
-          }
 
           Link(destination: URL(string: "https://github.com/DomenicoDD/cryptoscreen")!) {
             Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
@@ -609,238 +676,71 @@ private struct HeaderView: View {
 
 private struct PrivacySettingsView: View {
   @Environment(\.dismiss) private var dismiss
-  @ObservedObject var store: SealedMessageStore
-  @ObservedObject var proImageEntitlements: ProImageEntitlementStore
   @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
-  @State private var isShowingAnonymousFeedback = false
-#if !APPCLIP
-  @State private var isShowingProPaywall = false
-  @State private var isOpeningSubscriptionManagement = false
-  @State private var subscriptionManagementError: String?
-#endif
 
   var body: some View {
     ZStack {
       Color(red: 0.045, green: 0.047, blue: 0.043)
         .ignoresSafeArea()
 
-      VStack(alignment: .leading, spacing: 18) {
-        HStack(alignment: .center) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Privacy settings")
-              .font(.system(size: 24, weight: .semibold, design: .rounded))
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-
-            Text("Read receipts are reciprocal.")
-              .font(.system(size: 13, weight: .medium, design: .rounded))
-              .foregroundStyle(Color.white.opacity(0.56))
-          }
-
-          Spacer()
-
-          Button {
-            dismiss()
-            softHaptic()
-          } label: {
-            Image(systemName: "xmark")
-              .font(.system(size: 15, weight: .bold))
-              .frame(width: 40, height: 40)
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-              .background(Color.white.opacity(0.08), in: Circle())
-              .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
-          }
-          .accessibilityLabel("Close privacy settings")
-        }
-
-        VStack(alignment: .leading, spacing: 12) {
-          Toggle(isOn: $sharesInteractionStatus) {
-            VStack(alignment: .leading, spacing: 5) {
-              Text("Share interaction status")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
+      ScrollView(.vertical, showsIndicators: true) {
+        VStack(alignment: .leading, spacing: 18) {
+          HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Privacy Settings")
+                .font(.system(size: 24, weight: .semibold, design: .rounded))
                 .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
 
-              Text("Off by default. When enabled, your app can share limited read and screenshot status while you read sealed messages. You can see detailed interaction status on messages you sent only when the reader also shared it.")
+              Text("Read receipts are reciprocal.")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.58))
-                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(Color.white.opacity(0.56))
             }
-          }
-          .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
 
-          Text("One-time links still reveal basic availability: if a link no longer opens, someone with the link can infer it was opened, expired, destroyed, or manually expired. Interaction status is separate and works both ways only when you enable it.")
-            .font(.system(size: 12, weight: .medium, design: .rounded))
-            .foregroundStyle(Color.white.opacity(0.48))
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(16)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+            Spacer()
 
-        VStack(alignment: .leading, spacing: 12) {
-          HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "paperplane.fill")
-              .font(.system(size: 18, weight: .semibold))
-              .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70))
-              .frame(width: 28, height: 28)
-
-            VStack(alignment: .leading, spacing: 5) {
-              Text("Anonymous feedback")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-
-              Text("Write a private note to the developer. No account, sealed link, PIN, or message content is attached.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.58))
-                .fixedSize(horizontal: false, vertical: true)
-            }
-          }
-
-          Button {
-            isShowingAnonymousFeedback = true
-            softHaptic()
-          } label: {
-            Label("Send anonymous feedback", systemImage: "bubble.left.and.text.bubble.right.fill")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(SettingsActionButtonStyle())
-        }
-        .padding(16)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
-
-#if !APPCLIP
-        VStack(alignment: .leading, spacing: 12) {
-          HStack(alignment: .top, spacing: 12) {
-            Image(systemName: proImageEntitlements.isImageAttachmentUnlocked ? "checkmark.seal.fill" : "photo.badge.plus")
-              .font(.system(size: 18, weight: .semibold))
-              .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70))
-              .frame(width: 28, height: 28)
-
-            VStack(alignment: .leading, spacing: 5) {
-              Text("Pro Images")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-
-              Text(proImageEntitlements.isImageAttachmentUnlocked ? "Image attachments are active on this Apple ID." : "Open the paywall to enable encrypted image attachments.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(0.58))
-                .fixedSize(horizontal: false, vertical: true)
-            }
-          }
-
-          VStack(spacing: 10) {
             Button {
-              isShowingProPaywall = true
+              dismiss()
               softHaptic()
             } label: {
-              Label(proImageEntitlements.isImageAttachmentUnlocked ? "View Pro paywall" : "Open Pro paywall", systemImage: "sparkles")
-                .frame(maxWidth: .infinity)
+              Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .bold))
+                .frame(width: 40, height: 40)
+                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+                .background(Color.white.opacity(0.08), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
-            .buttonStyle(SettingsActionButtonStyle())
-
-            Button {
-              Task {
-                await proImageEntitlements.restorePurchases()
-              }
-            } label: {
-              Label("Restore purchase", systemImage: "arrow.clockwise")
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(SettingsActionButtonStyle())
-            .disabled(proImageEntitlements.isLoading || proImageEntitlements.isPurchasing)
-
-            Button {
-              openSubscriptionManagement()
-            } label: {
-              Label(isOpeningSubscriptionManagement ? "Opening..." : "Manage or cancel subscription", systemImage: "creditcard")
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(SettingsActionButtonStyle())
-            .disabled(isOpeningSubscriptionManagement)
+            .accessibilityLabel("Close privacy settings")
           }
 
-          if let errorMessage = proImageEntitlements.errorMessage ?? subscriptionManagementError {
-            Text(errorMessage)
+          VStack(alignment: .leading, spacing: 12) {
+            Toggle(isOn: $sharesInteractionStatus) {
+              VStack(alignment: .leading, spacing: 5) {
+                Text("Share interaction status")
+                  .font(.system(size: 16, weight: .semibold, design: .rounded))
+                  .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+
+                Text("Off by default. When enabled, your app can share limited read and screenshot status while you read sealed messages. You can see detailed interaction status on messages you sent only when the reader also shared it.")
+                  .font(.system(size: 13, weight: .medium, design: .rounded))
+                  .foregroundStyle(Color.white.opacity(0.58))
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+            }
+            .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
+
+            Text("One-time links still reveal basic availability: if a link no longer opens, someone with the link can infer it was opened, expired, destroyed, or manually expired. Interaction status is separate and works both ways only when you enable it.")
               .font(.system(size: 12, weight: .medium, design: .rounded))
-              .foregroundStyle(Color(red: 1.0, green: 0.68, blue: 0.38))
+              .foregroundStyle(Color.white.opacity(0.48))
               .fixedSize(horizontal: false, vertical: true)
           }
+          .padding(16)
+          .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
         }
-        .padding(16)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
-#endif
-
-        Spacer()
-      }
-      .padding(.horizontal, 20)
-      .padding(.top, 22)
-    }
-    .sheet(isPresented: $isShowingAnonymousFeedback) {
-      CryptoscreenReviewPrompt(
-        startsWithFeedback: true,
-        sendFeedback: { feedback in
-          try await store.submitFeedback(rating: 2, message: feedback)
-        },
-        onDone: {
-          isShowingAnonymousFeedback = false
-        }
-      )
-      .presentationDetents([.medium, .large])
-      .presentationDragIndicator(.visible)
-    }
-#if !APPCLIP
-    .sheet(isPresented: $isShowingProPaywall) {
-      ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
-    }
-    .task {
-      await proImageEntitlements.refresh()
-    }
-#endif
-  }
-
-#if !APPCLIP
-  private func openSubscriptionManagement() {
-    guard let scene = UIApplication.shared.connectedScenes
-      .compactMap({ $0 as? UIWindowScene })
-      .first(where: { $0.activationState == .foregroundActive }) else {
-      subscriptionManagementError = "Could not open subscription settings."
-      return
-    }
-
-    subscriptionManagementError = nil
-    isOpeningSubscriptionManagement = true
-
-    Task {
-      defer {
-        isOpeningSubscriptionManagement = false
-      }
-
-      do {
-        try await AppStore.showManageSubscriptions(in: scene)
-        await proImageEntitlements.refresh()
-      } catch {
-        subscriptionManagementError = "Could not open subscription settings."
+        .padding(.horizontal, 20)
+        .padding(.top, 22)
+        .padding(.bottom, 32)
       }
     }
-  }
-#endif
-}
-
-private struct SettingsActionButtonStyle: ButtonStyle {
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .font(.system(size: 14, weight: .semibold, design: .rounded))
-      .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-      .padding(.vertical, 12)
-      .padding(.horizontal, 12)
-      .background(
-        configuration.isPressed ? Color.white.opacity(0.14) : Color.white.opacity(0.08),
-        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-      )
-      .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
   }
 }
 

@@ -18,6 +18,8 @@
 		0A0010010000000000000009 /* SealedMessageAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000010 /* SealedMessageAPI.swift */; };
 		0A001001000000000000000A /* ProImageEntitlementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000016 /* ProImageEntitlementStore.swift */; };
 		0A001001000000000000000B /* CryptoscreenReviewPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */; };
+		0A001001000000000000000C /* ReaderInteractionPrototypeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000019 /* ReaderInteractionPrototypeView.swift */; };
+		0A001001000000000000000D /* ParagraphRevealReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001A /* ParagraphRevealReaderView.swift */; };
 		0A0010020000000000000001 /* PrivacyScreenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000001 /* PrivacyScreenApp.swift */; };
 		0A0010020000000000000002 /* PrivacyReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000002 /* PrivacyReaderView.swift */; };
 		0A0010020000000000000003 /* ProximitySensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000003 /* ProximitySensor.swift */; };
@@ -31,6 +33,7 @@
 		0A001002000000000000000B /* PrivacyScreenClip.app in Embed App Clips */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000013 /* PrivacyScreenClip.app */; };
 		0A001002000000000000000C /* ProImageEntitlementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000016 /* ProImageEntitlementStore.swift */; };
 		0A001002000000000000000D /* CryptoscreenReviewPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */; };
+		0A001002000000000000000E /* ParagraphRevealReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001A /* ParagraphRevealReaderView.swift */; };
 		0B0010010000000000000001 /* MessagesViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000001 /* MessagesViewController.swift */; };
 		0B0010010000000000000002 /* MessagesComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000002 /* MessagesComposeView.swift */; };
 		0B0010010000000000000003 /* MessagesSenderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000003 /* MessagesSenderService.swift */; };
@@ -77,6 +80,8 @@
 		0A0020010000000000000016 /* ProImageEntitlementStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProImageEntitlementStore.swift; sourceTree = "<group>"; };
 		0A0020010000000000000017 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Products.storekit; sourceTree = "<group>"; };
 		0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoscreenReviewPrompt.swift; sourceTree = "<group>"; };
+		0A0020010000000000000019 /* ReaderInteractionPrototypeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderInteractionPrototypeView.swift; sourceTree = "<group>"; };
+		0A002001000000000000001A /* ParagraphRevealReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParagraphRevealReaderView.swift; sourceTree = "<group>"; };
 		0B0020010000000000000001 /* MessagesViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesViewController.swift; sourceTree = "<group>"; };
 		0B0020010000000000000002 /* MessagesComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesComposeView.swift; sourceTree = "<group>"; };
 		0B0020010000000000000003 /* MessagesSenderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesSenderService.swift; sourceTree = "<group>"; };
@@ -135,6 +140,8 @@
 				0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */,
 				0A0020010000000000000008 /* CaptureShield.swift */,
 				0A0020010000000000000009 /* SealedMessageRootView.swift */,
+				0A0020010000000000000019 /* ReaderInteractionPrototypeView.swift */,
+				0A002001000000000000001A /* ParagraphRevealReaderView.swift */,
 				0A0020010000000000000005 /* Assets.xcassets */,
 				0A0020010000000000000011 /* PrivacyScreen.entitlements */,
 			);
@@ -335,6 +342,8 @@
 				0A001001000000000000000B /* CryptoscreenReviewPrompt.swift in Sources */,
 				0A0010010000000000000007 /* CaptureShield.swift in Sources */,
 				0A0010010000000000000008 /* SealedMessageRootView.swift in Sources */,
+				0A001001000000000000000C /* ReaderInteractionPrototypeView.swift in Sources */,
+				0A001001000000000000000D /* ParagraphRevealReaderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -353,6 +362,7 @@
 				0A0010020000000000000009 /* PrivacyScreenClipApp.swift in Sources */,
 				0A001002000000000000000C /* ProImageEntitlementStore.swift in Sources */,
 				0A001002000000000000000D /* CryptoscreenReviewPrompt.swift in Sources */,
+				0A001002000000000000000E /* ParagraphRevealReaderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -507,7 +517,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreen/PrivacyScreen.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -517,7 +527,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.domenico.privacyscreen;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -537,7 +547,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreen/PrivacyScreen.entitlements;
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -547,13 +557,14 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.domenico.privacyscreen;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "cryptoscreen AppStore 2026-06-11";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = READER_LAB;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -567,7 +578,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreenClip/PrivacyScreenClip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = PrivacyScreenClip/Info.plist;
@@ -576,7 +587,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.domenico.privacyscreen.Clip;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -597,7 +608,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreenClip/PrivacyScreenClip.entitlements;
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = PrivacyScreenClip/Info.plist;
@@ -606,7 +617,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.domenico.privacyscreen.Clip;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "cryptoscreen AppClip AppStore 2026-06-11";
@@ -626,7 +637,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -637,7 +648,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.domenico.privacyscreen.MessagesExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -657,7 +668,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 27;
+				CURRENT_PROJECT_VERSION = 29;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -668,7 +679,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.domenico.privacyscreen.MessagesExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "cryptoscreen MessagesExtension local cert 06/26";

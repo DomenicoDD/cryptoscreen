@@ -11,6 +11,41 @@ If the route changes, use the river entrance and count seven doors from the bake
 Delete this thread after the address arrives. If I miss the window, keep moving and wait for the morning train. Nobody else should see the plain text.
 """
 
+private enum PrivacyReaderInteractionMode: String, CaseIterable, Identifiable, Equatable {
+  case handOnScreen
+  case flashlight
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .handOnScreen:
+      return "Hand on screen"
+    case .flashlight:
+      return "Flashlight"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .handOnScreen:
+      return "hand.raised.fill"
+    case .flashlight:
+      return "lightbulb.fill"
+    }
+  }
+}
+
+private struct FlashlightLineRevealSpec: Equatable {
+  let lineID: Int
+  let start: Int
+  let length: Int
+
+  var seed: Int {
+    lineID &* 193 + start &* 17 + length
+  }
+}
+
 struct PrivacyReaderView: View {
   let message: String
   let showsFontControls: Bool
@@ -34,6 +69,11 @@ struct PrivacyReaderView: View {
   @State private var didReveal = false
   @State private var didScroll = false
   @State private var pendingExternalLink: PendingExternalLink?
+  @State private var interactionMode: PrivacyReaderInteractionMode = .handOnScreen
+  @State private var flashlightLocation: CGPoint = .zero
+  @State private var didInitializeFlashlightLocation = false
+  @State private var latestLineFrames: [LineFrame] = []
+  @State private var flashlightRevealSpecs: [Int: FlashlightLineRevealSpec] = [:]
 
   init(
     message: String = sampleMessage,
@@ -54,11 +94,12 @@ struct PrivacyReaderView: View {
   }
 
   private var revealActive: Bool {
-    proximitySensor.isRevealActive
+    interactionMode == .handOnScreen && proximitySensor.isRevealActive
   }
 
   var body: some View {
     GeometryReader { proxy in
+      let size = proxy.size
       let touchButtonTop = max(proxy.safeAreaInsets.top + 44, 84)
       let touchButtonSize = CGSize(width: proxy.size.width * 0.70, height: 58)
       let touchZone = CGRect(
@@ -88,14 +129,25 @@ struct PrivacyReaderView: View {
           ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(alignment: .leading, spacing: fontSize * 0.32) {
               ForEach(lines) { line in
-                ScrambleLineText(
-                  text: line.text,
-                  attributedText: line.attributedText,
-                  lineID: line.id,
-                  fontSize: fontSize,
-                  isRevealed: revealActive && revealedLineIDs.contains(line.id),
-                  isActive: revealActive && activeLineID == line.id
-                )
+                Group {
+                  if interactionMode == .flashlight {
+                    FlashlightLineText(
+                      text: line.text,
+                      lineID: line.id,
+                      fontSize: fontSize,
+                      revealSpec: flashlightRevealSpecs[line.id]
+                    )
+                  } else {
+                    ScrambleLineText(
+                      text: line.text,
+                      attributedText: line.attributedText,
+                      lineID: line.id,
+                      fontSize: fontSize,
+                      isRevealed: revealActive && revealedLineIDs.contains(line.id),
+                      isActive: revealActive && activeLineID == line.id
+                    )
+                  }
+                }
                 .background(
                   GeometryReader { lineProxy in
                     Color.clear.preference(
@@ -116,21 +168,49 @@ struct PrivacyReaderView: View {
             .padding(.bottom, bottomReadingPadding)
           }
           .onPreferenceChange(LineFramePreferenceKey.self) { frames in
-            updateRevealWindow(frames: frames, revealZone: revealZone)
+            latestLineFrames = frames
+
+            switch interactionMode {
+            case .handOnScreen:
+              updateRevealWindow(frames: frames, revealZone: revealZone)
+            case .flashlight:
+              updateFlashlightReveal(frames: frames, lines: lines, size: size)
+            }
           }
 
-          RevealTouchTestButton(
-            isRevealActive: revealActive,
-            showsHint: showsTouchHint,
-            frame: touchZone
-          )
+          if interactionMode == .handOnScreen {
+            RevealTouchTestButton(
+              isRevealActive: revealActive,
+              showsHint: showsTouchHint,
+              frame: touchZone
+            )
 
-          RevealTouchCaptureView { isActive in
-            proximitySensor.setScreenCoverActive(isActive)
+            RevealTouchCaptureView { isActive in
+              proximitySensor.setScreenCoverActive(isActive)
+            }
+            .frame(width: touchCaptureZone.width, height: touchCaptureZone.height)
+            .position(x: touchCaptureZone.midX, y: touchCaptureZone.midY)
+            .accessibilityHidden(true)
           }
-          .frame(width: touchCaptureZone.width, height: touchCaptureZone.height)
-          .position(x: touchCaptureZone.midX, y: touchCaptureZone.midY)
-          .accessibilityHidden(true)
+
+          if interactionMode == .flashlight {
+            ReaderFlashlightBeamOverlay(
+              location: normalizedFlashlightLocation(in: size),
+              fontSize: fontSize
+            )
+            .allowsHitTesting(false)
+
+            ReaderFlashlightHandle(
+              location: normalizedFlashlightLocation(in: size),
+              fontSize: fontSize
+            )
+            .gesture(
+              DragGesture(minimumDistance: 0, coordinateSpace: .named("readerScreen"))
+                .onChanged { value in
+                  updateFlashlightLocation(value.location, in: size)
+                }
+            )
+          }
 
           if didReveal && !didScroll {
             ScrollTeachingPill()
@@ -142,6 +222,7 @@ struct PrivacyReaderView: View {
 
           ReaderChrome(
             fontSize: $fontSize,
+            interactionMode: $interactionMode,
             showsFontControls: showsFontControls,
             onClose: onClose
           )
@@ -178,12 +259,20 @@ struct PrivacyReaderView: View {
       .simultaneousGesture(
         DragGesture(minimumDistance: 0, coordinateSpace: .named("readerScreen"))
           .onChanged { value in
+            if interactionMode == .flashlight,
+               distance(from: value.startLocation, to: normalizedFlashlightLocation(in: size)) < 46 {
+              return
+            }
+
             markScrolledIfNeeded(value.translation)
           }
       )
       .onAppear {
         UIApplication.shared.isIdleTimerDisabled = true
-        proximitySensor.start()
+        initializeFlashlightLocationIfNeeded(in: size)
+        if interactionMode == .handOnScreen {
+          proximitySensor.start()
+        }
         presentHandPlacementGuideIfNeeded()
         hintDelayTask?.cancel()
         hintDelayTask = Task {
@@ -214,6 +303,25 @@ struct PrivacyReaderView: View {
         if isActive {
           markRevealed()
         }
+      }
+      .onChange(of: interactionMode) { _, mode in
+        switch mode {
+        case .handOnScreen:
+          flashlightRevealSpecs.removeAll()
+          proximitySensor.start()
+        case .flashlight:
+          proximitySensor.stop()
+          revealedLineIDs.removeAll()
+          activeLineID = nil
+          pendingLineID = nil
+          initializeFlashlightLocationIfNeeded(in: size)
+          updateFlashlightReveal(frames: latestLineFrames, lines: lines, size: size)
+        }
+
+        Haptics.buttonTap()
+      }
+      .onChange(of: flashlightLocation) { _, _ in
+        updateFlashlightReveal(frames: latestLineFrames, lines: lines, size: size)
       }
     }
   }
@@ -269,6 +377,88 @@ struct PrivacyReaderView: View {
 
     didScroll = true
     onScrollPerformed()
+  }
+
+  private func initializeFlashlightLocationIfNeeded(in size: CGSize) {
+    guard !didInitializeFlashlightLocation, size.width > 1, size.height > 1 else {
+      return
+    }
+
+    flashlightLocation = CGPoint(
+      x: max(size.width - 68, 64),
+      y: max(size.height * 0.72, 150)
+    )
+    didInitializeFlashlightLocation = true
+  }
+
+  private func normalizedFlashlightLocation(in size: CGSize) -> CGPoint {
+    guard didInitializeFlashlightLocation else {
+      return CGPoint(x: max(size.width - 68, 64), y: max(size.height * 0.72, 150))
+    }
+
+    return CGPoint(
+      x: min(max(flashlightLocation.x, 38), max(size.width - 38, 38)),
+      y: min(max(flashlightLocation.y, 96), max(size.height - 84, 96))
+    )
+  }
+
+  private func updateFlashlightLocation(_ location: CGPoint, in size: CGSize) {
+    initializeFlashlightLocationIfNeeded(in: size)
+    flashlightLocation = CGPoint(
+      x: min(max(location.x, 38), max(size.width - 38, 38)),
+      y: min(max(location.y, 96), max(size.height - 84, 96))
+    )
+    markRevealed()
+  }
+
+  private func updateFlashlightReveal(frames: [LineFrame], lines: [ReaderLine], size: CGSize) {
+    guard interactionMode == .flashlight else {
+      return
+    }
+
+    let location = normalizedFlashlightLocation(in: size)
+    let linesByID = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0) })
+    var nextSpecs: [Int: FlashlightLineRevealSpec] = [:]
+
+    for frame in frames {
+      guard let line = linesByID[frame.id],
+            let spec = flashlightRevealSpec(for: line, frame: frame.frame, location: location) else {
+        continue
+      }
+
+      nextSpecs[line.id] = spec
+    }
+
+    if flashlightRevealSpecs != nextSpecs {
+      flashlightRevealSpecs = nextSpecs
+    }
+  }
+
+  private func flashlightRevealSpec(
+    for line: ReaderLine,
+    frame: CGRect,
+    location: CGPoint
+  ) -> FlashlightLineRevealSpec? {
+    let beamTop = location.y - fontSize * 3.35
+    let beamBottom = location.y - max(fontSize * 0.42, 10)
+    guard frame.midY >= beamTop, frame.midY <= beamBottom else {
+      return nil
+    }
+
+    let characters = Array(line.text)
+    guard !characters.isEmpty else {
+      return nil
+    }
+
+    let characterAdvance = max(fontSize * 0.60, 1)
+    let revealLength = min(characters.count, 9)
+    let centerIndex = Int(((location.x - frame.minX) / characterAdvance).rounded(.toNearestOrAwayFromZero))
+    guard centerIndex > -revealLength, centerIndex < characters.count + revealLength else {
+      return nil
+    }
+
+    let start = min(max(centerIndex - revealLength / 2, 0), max(characters.count - revealLength, 0))
+    return FlashlightLineRevealSpec(lineID: line.id, start: start, length: revealLength)
   }
 
   private func updateRevealWindow(frames: [LineFrame], revealZone: CGRect) {
@@ -548,6 +738,195 @@ final class RevealTouchCaptureUIView: UIView {
   }
 }
 
+private struct FlashlightLineText: View {
+  let text: String
+  let lineID: Int
+  let fontSize: CGFloat
+  let revealSpec: FlashlightLineRevealSpec?
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var displayedText = ""
+  @State private var animationTask: Task<Void, Never>?
+
+  private var hiddenText: String {
+    CipherText.hiddenText(for: text, seed: lineID)
+  }
+
+  var body: some View {
+    Text(displayedText.isEmpty ? hiddenText : displayedText)
+      .font(.system(size: fontSize, weight: revealSpec == nil ? .regular : .semibold, design: .monospaced))
+      .foregroundStyle(revealSpec == nil ? Color.white.opacity(0.34) : Color(red: 0.965, green: 0.965, blue: 0.92))
+      .lineLimit(1)
+      .minimumScaleFactor(0.86)
+      .frame(maxWidth: .infinity, minHeight: fontSize * 1.35, alignment: .leading)
+      .shadow(color: revealSpec == nil ? .clear : Color(red: 0.3, green: 1.0, blue: 0.66).opacity(0.24), radius: 8, y: 1)
+      .accessibilityLabel(revealSpec == nil ? "Encrypted message line" : "Partially revealed message line")
+      .privacySensitive()
+      .onAppear {
+        displayedText = renderedText(progress: revealSpec == nil ? 0 : 1, tick: 0)
+      }
+      .onDisappear {
+        animationTask?.cancel()
+      }
+      .onChange(of: revealSpec) { _, _ in
+        restartAnimation()
+      }
+      .onChange(of: text) { _, _ in
+        restartAnimation()
+      }
+  }
+
+  private func restartAnimation() {
+    animationTask?.cancel()
+
+    guard revealSpec != nil else {
+      withAnimation(.easeOut(duration: reduceMotion ? 0.01 : 0.08)) {
+        displayedText = hiddenText
+      }
+      return
+    }
+
+    guard !reduceMotion else {
+      displayedText = renderedText(progress: 1, tick: 0)
+      return
+    }
+
+    animationTask = Task {
+      let tickCount = 6
+
+      for tick in 0..<tickCount {
+        guard !Task.isCancelled else {
+          return
+        }
+
+        let progress = Double(tick + 1) / Double(tickCount)
+        let nextText = renderedText(progress: progress, tick: tick)
+
+        await MainActor.run {
+          withAnimation(.linear(duration: 0.018)) {
+            displayedText = nextText
+          }
+        }
+
+        try? await Task.sleep(nanoseconds: 18_000_000)
+      }
+
+      await MainActor.run {
+        withAnimation(.easeOut(duration: 0.04)) {
+          displayedText = renderedText(progress: 1, tick: tickCount)
+        }
+      }
+    }
+  }
+
+  private func renderedText(progress: Double, tick: Int) -> String {
+    guard let revealSpec else {
+      return hiddenText
+    }
+
+    var characters = Array(hiddenText)
+    let originalCharacters = Array(text)
+    guard revealSpec.start < originalCharacters.count else {
+      return hiddenText
+    }
+
+    let end = min(revealSpec.start + revealSpec.length, originalCharacters.count)
+    let segment = String(originalCharacters[revealSpec.start..<end])
+    let resolvedSegment = Array(
+      CipherText.resolvingText(
+        for: segment,
+        seed: revealSpec.seed,
+        progress: progress,
+        tick: tick
+      )
+    )
+
+    for offset in 0..<resolvedSegment.count {
+      let index = revealSpec.start + offset
+      guard index < characters.count else {
+        break
+      }
+
+      characters[index] = resolvedSegment[offset]
+    }
+
+    return String(characters)
+  }
+}
+
+private struct ReaderFlashlightBeamOverlay: View {
+  let location: CGPoint
+  let fontSize: CGFloat
+
+  var body: some View {
+    Canvas { context, _ in
+      let beamHeight = fontSize * 3.35
+      let apex = CGPoint(x: location.x, y: location.y - 8)
+      let beamTop = max(location.y - beamHeight, 0)
+      let accent = Color(red: 0.48, green: 1.0, blue: 0.70)
+
+      for step in 0..<5 {
+        let inset = CGFloat(step)
+        let width = fontSize * (3.9 + inset * 0.62)
+        let opacity = 0.14 / Double(step + 1)
+        var path = Path()
+        path.move(to: CGPoint(x: apex.x - fontSize * 0.20, y: apex.y))
+        path.addLine(to: CGPoint(x: apex.x - width / 2, y: beamTop - inset * 1.5))
+        path.addLine(to: CGPoint(x: apex.x + width / 2, y: beamTop - inset * 1.5))
+        path.addLine(to: CGPoint(x: apex.x + fontSize * 0.20, y: apex.y))
+        path.closeSubpath()
+        context.fill(path, with: .color(accent.opacity(opacity)))
+      }
+
+      let glowRect = CGRect(
+        x: location.x - fontSize * 2.3,
+        y: location.y - beamHeight - fontSize * 0.8,
+        width: fontSize * 4.6,
+        height: beamHeight + fontSize
+      )
+      let gradient = Gradient(stops: [
+        .init(color: accent.opacity(0.22), location: 0),
+        .init(color: accent.opacity(0.08), location: 0.42),
+        .init(color: accent.opacity(0), location: 1)
+      ])
+      context.fill(
+        Path(ellipseIn: glowRect),
+        with: .radialGradient(gradient, center: CGPoint(x: location.x, y: location.y - beamHeight * 0.52), startRadius: 0, endRadius: fontSize * 2.6)
+      )
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+private struct ReaderFlashlightHandle: View {
+  let location: CGPoint
+  let fontSize: CGFloat
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .fill(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.14))
+        .frame(width: 72, height: 72)
+        .blur(radius: 8)
+
+      Circle()
+        .fill(Color(red: 0.48, green: 1.0, blue: 0.70))
+        .frame(width: 54, height: 54)
+        .overlay(Circle().stroke(Color.white.opacity(0.36), lineWidth: 1.2))
+        .shadow(color: Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.24), radius: 14, y: 4)
+
+      Image(systemName: "lightbulb.fill")
+        .font(.system(size: 21, weight: .bold))
+        .foregroundStyle(Color(red: 0.035, green: 0.047, blue: 0.04))
+    }
+    .frame(width: 84, height: 84)
+    .position(location)
+    .contentShape(Circle())
+    .accessibilityLabel("Flashlight reveal")
+    .accessibilityHint("Drag to reveal a small part of the message.")
+  }
+}
+
 private struct ScrambleLineText: View {
   let text: String
   let attributedText: AttributedString
@@ -649,6 +1028,7 @@ private struct ScrambleLineText: View {
 
 private struct ReaderChrome: View {
   @Binding var fontSize: CGFloat
+  @Binding var interactionMode: PrivacyReaderInteractionMode
   let showsFontControls: Bool
   let onClose: (() -> Void)?
 
@@ -707,8 +1087,35 @@ private struct ReaderChrome: View {
           .background(.ultraThinMaterial, in: Capsule())
           .overlay(Capsule().stroke(Color.white.opacity(0.13), lineWidth: 1))
         }
+
+        ReaderModeSettingsMenu(selection: $interactionMode)
       }
     }
+  }
+}
+
+private struct ReaderModeSettingsMenu: View {
+  @Binding var selection: PrivacyReaderInteractionMode
+
+  var body: some View {
+    Menu {
+      ForEach(PrivacyReaderInteractionMode.allCases) { mode in
+        Button {
+          selection = mode
+        } label: {
+          Label(mode.title, systemImage: mode == selection ? "checkmark" : mode.systemImage)
+        }
+      }
+    } label: {
+      Image(systemName: "gearshape.fill")
+        .font(.system(size: 16, weight: .semibold))
+        .frame(width: 44, height: 44)
+        .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+        .background(.ultraThinMaterial, in: Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.13), lineWidth: 1))
+    }
+    .accessibilityLabel("Reader settings")
+    .accessibilityHint("Choose the reveal mode")
   }
 }
 
@@ -798,6 +1205,10 @@ private struct LineFramePreferenceKey: PreferenceKey {
   static func reduce(value: inout [LineFrame], nextValue: () -> [LineFrame]) {
     value.append(contentsOf: nextValue())
   }
+}
+
+private func distance(from first: CGPoint, to second: CGPoint) -> CGFloat {
+  hypot(first.x - second.x, first.y - second.y)
 }
 
 private enum Haptics {
