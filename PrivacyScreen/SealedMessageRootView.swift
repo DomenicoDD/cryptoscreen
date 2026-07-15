@@ -194,7 +194,8 @@ final class SealedMessageStore: ObservableObject {
     message: String,
     pin: String,
     imageAttachmentData: Data? = nil,
-    imageContentType: String? = nil
+    imageContentType: String? = nil,
+    readPolicy: SealedMessageReadPolicy = .appOnly
   ) async throws -> CreatedSealedMessage {
     let upload = try SealedMessageCrypto.sealForUpload(plaintext: message, pin: pin)
     let imageAttachment: SealedImageAttachmentUpload?
@@ -212,7 +213,7 @@ final class SealedMessageStore: ObservableObject {
       imageAttachment = nil
     }
 
-    let createdMessage = try await api.create(upload: upload, imageAttachment: imageAttachment)
+    let createdMessage = try await api.create(upload: upload, imageAttachment: imageAttachment, readPolicy: readPolicy)
     upsertSentMessage(
       SentMessageRecord(
         id: createdMessage.id,
@@ -1201,6 +1202,7 @@ private struct ComposeSealedMessageView: View {
   let usesProgressiveOnboarding: Bool
   let onCompletion: () -> Void
 
+  @AppStorage("cryptoscreen.defaultReadPolicy") private var readPolicyRawValue = SealedMessageReadPolicy.appOnly.rawValue
   @State private var message: String
   @State private var pin = ""
   @State private var selectedPhotoItem: PhotosPickerItem?
@@ -1264,6 +1266,10 @@ private struct ComposeSealedMessageView: View {
 
   private var shouldShowCreateButton: Bool {
     !usesProgressiveOnboarding || showsOnboardingPinStep
+  }
+
+  private var readPolicy: SealedMessageReadPolicy {
+    SealedMessageReadPolicy(rawValue: readPolicyRawValue) ?? .appOnly
   }
 
   var body: some View {
@@ -1361,6 +1367,8 @@ private struct ComposeSealedMessageView: View {
         }
 #endif
 
+        readPolicySection
+
         if shouldShowPINSection {
           VStack(alignment: .leading, spacing: 10) {
             if usesProgressiveOnboarding {
@@ -1452,6 +1460,30 @@ private struct ComposeSealedMessageView: View {
     }
   }
 
+  private var readPolicySection: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      FieldHeader(title: "Read availability", isClearEnabled: false) {}
+
+      Picker("Read availability", selection: $readPolicyRawValue) {
+        ForEach(SealedMessageReadPolicy.allCases, id: \.rawValue) { policy in
+          Text(policy.title).tag(policy.rawValue)
+        }
+      }
+      .pickerStyle(.segmented)
+      .tint(Color(red: 0.48, green: 0.96, blue: 0.54))
+      .onChange(of: readPolicyRawValue) { _, _ in
+        createdMessage = nil
+        createdPlaintext = nil
+        errorMessage = nil
+      }
+
+      Text(readPolicy.detail)
+        .font(.system(size: 12, weight: .medium, design: .rounded))
+        .foregroundStyle(Color.white.opacity(0.48))
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
 #if !APPCLIP
   private func prepareSelectedImage(_ item: PhotosPickerItem?) async {
     guard let item else {
@@ -1531,7 +1563,8 @@ private struct ComposeSealedMessageView: View {
         message: plaintext,
         pin: pinToSeal,
         imageAttachmentData: imageDataToSeal,
-        imageContentType: imageDataToSeal == nil ? nil : "image/jpeg"
+        imageContentType: imageDataToSeal == nil ? nil : "image/jpeg",
+        readPolicy: readPolicy
       )
       let remainingAnimation = animationDuration - Date().timeIntervalSince(startedAt)
       if remainingAnimation > 0 {

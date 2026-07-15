@@ -50,7 +50,7 @@ The app must never connect directly to Neon or R2. It talks only to the Worker a
 
 Neon is Postgres. In this project it stores rows such as:
 
-- `sealed_messages`: encrypted text message bytes, cryptographic metadata, PIN attempt metadata, expiry time.
+- `sealed_messages`: encrypted text message bytes, cryptographic metadata, PIN attempt metadata, read policy, expiry time.
 - `message_stats`: one aggregate public counter for shared messages.
 - `sealed_message_attachments`: metadata for one encrypted image attachment per message.
 - `sealed_message_read_sessions`: short-lived one-time download sessions for encrypted image objects.
@@ -65,6 +65,8 @@ The important detail is what these tables do not store:
 - No raw image file key.
 
 `pin_verifier` is a server-peppered verifier. The Worker receives a client proof and stores/checks an HMAC using `SERVER_PIN_PEPPER`. This means a database-only leak is not enough to test PIN guesses offline without also having the server secret.
+
+`read_policy` is either `app_only` or `web_allowed`. It controls the hosted browser reader only; it does not add plaintext, contacts, or identity data to the stored row.
 
 ## Why the consume function is in Postgres
 

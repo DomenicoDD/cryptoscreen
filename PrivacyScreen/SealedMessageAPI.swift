@@ -6,7 +6,11 @@ struct SealedMessageAPI {
   let baseURL: URL
   var session: URLSession = .shared
 
-  func create(upload: SealedMessageUpload, imageAttachment: SealedImageAttachmentUpload? = nil) async throws -> CreatedSealedMessage {
+  func create(
+    upload: SealedMessageUpload,
+    imageAttachment: SealedImageAttachmentUpload? = nil,
+    readPolicy: SealedMessageReadPolicy = .appOnly
+  ) async throws -> CreatedSealedMessage {
     let body = CreateMessageRequest(
       ciphertext: upload.ciphertext.base64URLEncodedString(),
       nonce: upload.nonce.base64URLEncodedString(),
@@ -14,6 +18,7 @@ struct SealedMessageAPI {
       salt: upload.salt.base64URLEncodedString(),
       pinProof: upload.pinProof.base64URLEncodedString(),
       revokeProof: upload.revokeProof.base64URLEncodedString(),
+      readPolicy: readPolicy.rawValue,
       ttlSeconds: Int(SealedMessageCrypto.defaultTimeToLive)
     )
     let response: CreateMessageResponse = try await send(
@@ -59,7 +64,8 @@ struct SealedMessageAPI {
     do {
       let body = ConsumeMessageRequest(
         pinProof: pinProof.base64URLEncodedString(),
-        clientOptIn: sharesInteractionStatus
+        clientOptIn: sharesInteractionStatus,
+        readerClient: "ios_app"
       )
       let response: ConsumeMessageResponse = try await send(
         path: "/api/messages/\(request.messageID.uuidString.lowercased())/consume",
@@ -338,6 +344,7 @@ private struct CreateMessageRequest: Encodable {
   let salt: String
   let pinProof: String
   let revokeProof: String
+  let readPolicy: String
   let ttlSeconds: Int
 }
 
@@ -350,6 +357,7 @@ private struct CreateMessageResponse: Decodable {
 private struct ConsumeMessageRequest: Encodable {
   let pinProof: String
   let clientOptIn: Bool
+  let readerClient: String
 }
 
 private struct ExpireMessageRequest: Encodable {

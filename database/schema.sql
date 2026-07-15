@@ -4,6 +4,17 @@ create schema if not exists cryptoscreen;
 
 do $$
 begin
+  create type cryptoscreen.sealed_message_read_policy as enum (
+    'app_only',
+    'web_allowed'
+  );
+exception
+  when duplicate_object then null;
+end;
+$$;
+
+do $$
+begin
   create type cryptoscreen.sealed_message_consume_status as enum (
     'opened',
     'wrong_pin',
@@ -27,6 +38,7 @@ create table if not exists cryptoscreen.sealed_messages (
   failed_attempts smallint not null default 0,
   max_attempts smallint not null default 3,
   retained boolean not null default false,
+  read_policy cryptoscreen.sealed_message_read_policy not null default 'app_only',
   expires_at timestamptz not null,
   created_at timestamptz not null default now(),
   constraint sealed_messages_attempts_check
@@ -45,6 +57,9 @@ alter table cryptoscreen.sealed_messages
 
 alter table cryptoscreen.sealed_messages
   add column if not exists revoke_verifier bytea;
+
+alter table cryptoscreen.sealed_messages
+  add column if not exists read_policy cryptoscreen.sealed_message_read_policy not null default 'app_only';
 
 do $$
 begin
@@ -434,6 +449,9 @@ comment on column cryptoscreen.sealed_messages.pin_verifier is
 
 comment on column cryptoscreen.sealed_messages.retained is
   'Service-owned demo/review flag. Retained rows survive correct PIN reads, wrong PIN attempts, and expiry cleanup.';
+
+comment on column cryptoscreen.sealed_messages.read_policy is
+  'Controls whether the hosted web reader may consume a message. app_only requires the iOS app or App Clip UI; web_allowed permits browser-side decryption.';
 
 comment on table cryptoscreen.message_stats is
   'Aggregate service counters. shared_messages and image_attachments_shared are cumulative and contain no message content.';

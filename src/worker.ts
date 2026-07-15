@@ -21,6 +21,8 @@ const consumeStatuses = ["opened", "wrong_pin", "destroyed", "expired", "unavail
 const messageStatuses = ["active", "expired", "consumed", "destroyed"] as const;
 const attachmentContentTypes = ["image/jpeg", "image/png", "image/heic", "image/heif"] as const;
 const readSessionEventTypes = ["screenshot"] as const;
+const readPolicies = ["app_only", "web_allowed"] as const;
+const readerClients = ["ios_app", "web"] as const;
 const encoder = new TextEncoder();
 
 class HttpError extends Error {
@@ -40,12 +42,14 @@ type CreateMessageBody = {
   salt: string;
   pinProof: string;
   revokeProof?: string;
+  readPolicy: ReadPolicy;
   ttlSeconds?: number;
 };
 
 type ConsumeMessageBody = {
   pinProof: string;
   clientOptIn: boolean;
+  readerClient?: ReaderClient;
 };
 
 type ExpireMessageBody = {
@@ -92,6 +96,7 @@ type ConsumeMessageRow = {
 
 type MessageStatusRow = {
   status: (typeof messageStatuses)[number];
+  readPolicy: ReadPolicy | null;
   interactionStatusShared: boolean;
   textConsumed: boolean;
   imageAttachmentAttached: boolean;
@@ -100,6 +105,8 @@ type MessageStatusRow = {
 };
 
 type AttachmentContentType = (typeof attachmentContentTypes)[number];
+type ReadPolicy = (typeof readPolicies)[number];
+type ReaderClient = (typeof readerClients)[number];
 
 type AttachmentMetadataRow = {
   id: string;
@@ -127,10 +134,11 @@ type MessageStats = {
 type SqlClient = NeonQueryFunction<false, false>;
 
 let messageStatsSchemaReady: Promise<void> | null = null;
+let readPolicySchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-L0mMwZH2Y8BB9JbniZ5Xbk2cWIpVpMQyZCg7II8HSNM=' 'sha256-jV/YTTPdPdYxQ4KasU5NffuPLChgovdtiYvck0B/a0Q='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-v2wTEx2cm/YBT8RuLe+AF5v2/XwDXSk4ZYmWmn65LxA=' 'sha256-SAjLnFQGRwYRCTsTMsZBXzcU7aJLILgc12XqCVerAnc='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -225,6 +233,10 @@ export default {
 
       if (url.pathname === "/security") {
         return htmlResponse(securityPage(env));
+      }
+
+      if (url.pathname === "/transparency") {
+        return htmlResponse(transparencyPage(env));
       }
 
       if (url.pathname === "/support") {
@@ -382,6 +394,38 @@ async function applyMessageStatsSchema(sql: SqlClient): Promise<void> {
   `;
 }
 
+async function ensureReadPolicySchema(env: Env): Promise<void> {
+  if (!readPolicySchemaReady) {
+    const sql = neon(env.DATABASE_URL);
+    readPolicySchemaReady = applyReadPolicySchema(sql).catch((error) => {
+      readPolicySchemaReady = null;
+      throw error;
+    });
+  }
+
+  await readPolicySchemaReady;
+}
+
+async function applyReadPolicySchema(sql: SqlClient): Promise<void> {
+  await sql`
+    do $$
+    begin
+      create type cryptoscreen.sealed_message_read_policy as enum (
+        'app_only',
+        'web_allowed'
+      );
+    exception
+      when duplicate_object then null;
+    end;
+    $$
+  `;
+
+  await sql`
+    alter table cryptoscreen.sealed_messages
+      add column if not exists read_policy cryptoscreen.sealed_message_read_policy not null default 'app_only'
+  `;
+}
+
 async function safeMessageStats(env: Env): Promise<MessageStats | null> {
   try {
     return await getMessageStats(env);
@@ -402,6 +446,7 @@ async function submitFeedback(request: Request, env: Env): Promise<Response> {
 
 async function createMessage(request: Request, env: Env): Promise<Response> {
   const body = parseCreateBody(await readJson(request));
+  await ensureReadPolicySchema(env);
   const id = crypto.randomUUID();
   const ttlSeconds = clampTTL(body.ttlSeconds);
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
@@ -420,6 +465,7 @@ async function createMessage(request: Request, env: Env): Promise<Response> {
       salt,
       pin_verifier,
       revoke_verifier,
+      read_policy,
       max_attempts,
       expires_at
     )
@@ -431,6 +477,7 @@ async function createMessage(request: Request, env: Env): Promise<Response> {
       decode(${base64UrlToHex(body.salt, "salt", 16, 16)}, 'hex'),
       decode(${pinVerifierHex}, 'hex'),
       decode(${revokeVerifierHex}, 'hex'),
+      ${body.readPolicy}::cryptoscreen.sealed_message_read_policy,
       ${3},
       ${expiresAt.toISOString()}::timestamptz
     )
@@ -575,6 +622,13 @@ async function consumeMessage(request: Request, env: Env, messageID: string): Pr
   }
 
   const body = parseConsumeBody(await readJson(request));
+  if (body.readerClient === "web") {
+    const readPolicy = await activeMessageReadPolicy(env, messageID);
+    if (readPolicy === "app_only") {
+      throw new HttpError(403, "app_only_message", "This message can only be opened in the cryptoscreen app or App Clip.");
+    }
+  }
+
   const pinVerifierHex = bytesToHex(await pepperPinProof(base64UrlToBytes(body.pinProof, "pinProof", 32, 32), env));
   const row = await consumeMessageRow(env, messageID, pinVerifierHex);
 
@@ -649,6 +703,24 @@ async function updateAuditForConsumeResult(env: Env, messageID: string, row: Con
       where message_id = ${messageID}::uuid
     `;
   }
+}
+
+async function activeMessageReadPolicy(env: Env, messageID: string): Promise<ReadPolicy | null> {
+  await ensureReadPolicySchema(env);
+  const sql = neon(env.DATABASE_URL);
+  const rows = await sql`
+    select read_policy
+    from cryptoscreen.sealed_messages
+    where id = ${messageID}::uuid
+      and (retained or expires_at > now())
+    limit 1
+  `;
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return parseDatabaseReadPolicy(expectDatabaseRecord(rows[0]).read_policy);
 }
 
 async function consumeMessageRow(
@@ -1000,6 +1072,7 @@ async function messageStatus(env: Env, messageID: string): Promise<Response> {
     throw new HttpError(400, "invalid_message_id", "Message id must be a UUID.");
   }
 
+  await ensureReadPolicySchema(env);
   const sql = neon(env.DATABASE_URL);
   const rows = await sql`
     with expiring_message as (
@@ -1025,7 +1098,7 @@ async function messageStatus(env: Env, messageID: string): Promise<Response> {
       returning id
     ),
     active_message as (
-      select id
+      select id, read_policy
       from cryptoscreen.sealed_messages
       where id = ${messageID}::uuid
       limit 1
@@ -1037,6 +1110,7 @@ async function messageStatus(env: Env, messageID: string): Promise<Response> {
         when audit.expired_at is not null or exists (select 1 from deleted_expired) then 'expired'
         else 'consumed'
       end as status,
+      (select read_policy from active_message) as read_policy,
       coalesce(audit.interaction_status_opted_in_at is not null, false) as interaction_status_shared,
       case
         when coalesce(audit.interaction_status_opted_in_at is not null, false) then coalesce(audit.text_consumed_at is not null, false)
@@ -1127,6 +1201,7 @@ function parseCreateBody(value: unknown): CreateMessageBody {
     salt: expectString(body.salt, "salt"),
     pinProof: expectString(body.pinProof, "pinProof"),
     revokeProof: body.revokeProof === undefined ? undefined : expectString(body.revokeProof, "revokeProof"),
+    readPolicy: parseOptionalReadPolicy(body.readPolicy),
     ttlSeconds
   };
 }
@@ -1136,7 +1211,8 @@ function parseConsumeBody(value: unknown): ConsumeMessageBody {
 
   return {
     pinProof: expectString(body.pinProof, "pinProof"),
-    clientOptIn: body.clientOptIn === true
+    clientOptIn: body.clientOptIn === true,
+    readerClient: parseOptionalReaderClient(body.readerClient)
   };
 }
 
@@ -1209,6 +1285,36 @@ function parseAttachmentContentType(value: string | null): AttachmentContentType
   }
 
   return contentType;
+}
+
+function parseOptionalReadPolicy(value: unknown): ReadPolicy {
+  if (value === undefined || value === null) {
+    return "app_only";
+  }
+
+  return parseReadPolicy(expectString(value, "readPolicy"));
+}
+
+function parseReadPolicy(value: string): ReadPolicy {
+  const readPolicy = value.trim().toLowerCase();
+  if (!isReadPolicy(readPolicy)) {
+    throw new HttpError(400, "invalid_read_policy", "readPolicy must be app_only or web_allowed.");
+  }
+
+  return readPolicy;
+}
+
+function parseOptionalReaderClient(value: unknown): ReaderClient | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const readerClient = expectString(value, "readerClient").trim().toLowerCase();
+  if (!isReaderClient(readerClient)) {
+    throw new HttpError(400, "invalid_reader_client", "readerClient must be ios_app or web.");
+  }
+
+  return readerClient;
 }
 
 function expectHeader(value: string | null, field: string): string {
@@ -1523,6 +1629,7 @@ function parseMessageStatusRow(value: unknown): MessageStatusRow {
 
   return {
     status: status as MessageStatusRow["status"],
+    readPolicy: parseNullableReadPolicy(row.read_policy),
     interactionStatusShared: expectDatabaseBoolean(row.interaction_status_shared, "interaction_status_shared"),
     textConsumed: expectDatabaseBoolean(row.text_consumed, "text_consumed"),
     imageAttachmentAttached: expectDatabaseBoolean(row.image_attachment_attached, "image_attachment_attached"),
@@ -1617,6 +1724,31 @@ function expectNullableDatabaseBoolean(value: unknown, field: string): boolean |
 
 function isConsumeStatus(value: string): value is ConsumeMessageRow["status"] {
   return consumeStatuses.includes(value as ConsumeMessageRow["status"]);
+}
+
+function parseNullableReadPolicy(value: unknown): ReadPolicy | null {
+  if (value === null) {
+    return null;
+  }
+
+  return parseDatabaseReadPolicy(value);
+}
+
+function parseDatabaseReadPolicy(value: unknown): ReadPolicy {
+  const readPolicy = expectDatabaseString(value, "read_policy");
+  if (!isReadPolicy(readPolicy)) {
+    throw new HttpError(500, "invalid_database_result", "The database field read_policy was invalid.");
+  }
+
+  return readPolicy;
+}
+
+function isReadPolicy(value: string): value is ReadPolicy {
+  return readPolicies.includes(value as ReadPolicy);
+}
+
+function isReaderClient(value: string): value is ReaderClient {
+  return readerClients.includes(value as ReaderClient);
 }
 
 function parseNullableAttachmentType(value: unknown): "image" | null {
@@ -1742,6 +1874,7 @@ async function homePage(env: Env): Promise<string> {
           <div class="actions">
             <a class="button primary" href="${escapeAttribute(links.appStoreUrl)}" rel="noreferrer">Download on the App Store</a>
             <a class="button" href="/support">Support</a>
+            <a class="button ghost" href="/transparency">Transparency</a>
             <a class="button ghost" href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
             <a class="button ghost" href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
           </div>
@@ -1786,6 +1919,7 @@ async function homePage(env: Env): Promise<string> {
         <nav class="link-list" aria-label="Apple review">
           <a href="/privacy">Privacy Policy</a>
           <a href="/security">Security Resources</a>
+          <a href="/transparency">Transparency</a>
           <a href="/support">Support</a>
           <a href="/.well-known/apple-app-site-association">Apple association</a>
           <a href="/m/example-message-id">Universal link page</a>
@@ -1798,7 +1932,8 @@ async function homePage(env: Env): Promise<string> {
 }
 
 function messagePage(url: URL, env: Env): string {
-  const messageID = escapeHtml(url.pathname.split("/").pop() ?? "");
+  const rawMessageID = url.pathname.split("/").pop() ?? "";
+  const messageID = escapeHtml(rawMessageID);
   const messageUrl = messageUrlWithoutFragment(url, env);
   const links = siteLinks(env);
 
@@ -1806,25 +1941,39 @@ function messagePage(url: URL, env: Env): string {
     "Open sealed message",
     env,
     `
-      <section class="panel">
+      <section class="panel" data-message-id="${escapeAttribute(rawMessageID)}">
         <p class="eyebrow">Sealed message</p>
         <h1>Open in cryptoscreen</h1>
         <p>
-          This link points to message <code>${messageID}</code>. Open it on iPhone with cryptoscreen or the App Clip, then enter the six-digit PIN from the sender.
+          This link points to message <code>${messageID}</code>. cryptoscreen will try the iOS app first. If the sender allowed browser reading, you can also unlock it here with the six-digit PIN.
         </p>
         <p class="note">
-          The decryption secret belongs in the URL fragment after <code>#s=</code>. Browsers do not send that fragment to this server. If iOS reports a screenshot while the note is open, the app destroys the visible reader session.
+          The decryption secret belongs in the URL fragment after <code>#s=</code>. Browsers do not send that fragment to this server.
         </p>
-        <div class="actions">
-          <a class="button primary" data-open-message href="${escapeAttribute(messageUrl)}">Open message</a>
+        <div class="actions" data-app-actions>
+          <a class="button primary" data-open-message href="${escapeAttribute(messageUrl)}">Open in app</a>
+          <a class="button" data-app-clip href="${escapeAttribute(messageUrl)}">Open App Clip</a>
           <a class="button" href="${escapeAttribute(links.appStoreUrl)}">Download on the App Store</a>
-          <a class="button" href="/support">Support</a>
         </div>
-        <p class="hint">
-          On iPhone, this button uses the same universal link. If the app is installed, iOS opens the app. Otherwise, install cryptoscreen from the App Store.
-        </p>
+        <p class="hint" data-open-state>Checking this message...</p>
+        <form class="browser-reader" data-browser-reader hidden>
+          <label class="input-label" for="pin">Six-digit PIN</label>
+          <input id="pin" name="pin" type="text" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" maxlength="6" placeholder="000000" data-pin>
+          <button class="button primary" type="submit">Read in browser</button>
+          <p class="browser-warning">
+            Browser reading has lower protection than the iOS app. The server still does not receive the link secret or plaintext, but Safari cannot provide the app's capture shielding.
+          </p>
+        </form>
+        <div class="message-output" data-message-output hidden>
+          <p class="eyebrow">Message</p>
+          <pre data-plaintext></pre>
+          <img data-attachment alt="Encrypted attachment" hidden>
+        </div>
+        <p class="hint" data-reader-status></p>
       </section>
     `,
+    true,
+    messageReaderScript(),
     true
   );
 }
@@ -1841,7 +1990,7 @@ function privacyPage(env: Env): string {
         <h2>What the server cannot read</h2>
         <p>The server stores ciphertext and encrypted attachment bytes only. The decryption secret is kept in the URL fragment after <code>#s=</code>, which browsers do not send to the server in normal HTTP requests. The six-digit PIN is entered locally and is not stored by the service.</p>
         <h2>What the service stores to make messages work</h2>
-        <p>The production API stores encrypted message bytes, nonce, tag, salt, expiry time, failed attempt count, and a server-peppered PIN verifier. When a sender attaches an image, the service stores encrypted image object bytes in private R2 storage plus encrypted attachment metadata in Neon. User message rows and attachment metadata are deleted after a successful read, after the third wrong PIN, or after expiry cleanup. Unused user links expire after ${LINK_RETENTION_DAYS} days.</p>
+        <p>The production API stores encrypted message bytes, nonce, tag, salt, read policy, expiry time, failed attempt count, and a server-peppered PIN verifier. When a sender attaches an image, the service stores encrypted image object bytes in private R2 storage plus encrypted attachment metadata in Neon. User message rows and attachment metadata are deleted after a successful read, after the third wrong PIN, or after expiry cleanup. Unused user links expire after ${LINK_RETENTION_DAYS} days.</p>
         <p>After a successful read with an image attachment, the app downloads the encrypted image bytes through a short-lived one-time read session. The R2 object is deleted after that one-time download. Expired attachment objects and read sessions are deleted by scheduled cleanup.</p>
         <h2>Status data and telemetry</h2>
         <p>cryptoscreen does not use ad SDKs, tracking SDKs, third-party analytics SDKs, or contact upload. There is no account profile.</p>
@@ -1957,7 +2106,7 @@ function securityPage(env: Env): string {
           <h2>The server stores enough to enforce one controlled read.</h2>
         </div>
         <div class="copy-stack">
-          <p>Neon stores encrypted message bytes, nonce, tag, salt, expiry time, failed attempt count, and a server-peppered PIN verifier. Cloudflare R2 stores encrypted image object bytes when an image is attached.</p>
+          <p>Neon stores encrypted message bytes, nonce, tag, salt, read policy, expiry time, failed attempt count, and a server-peppered PIN verifier. Cloudflare R2 stores encrypted image object bytes when an image is attached.</p>
           <p>User message rows delete after one successful read, after the third wrong PIN attempt, when the sender expires the message, or after ${LINK_RETENTION_DAYS} days if unopened. Encrypted attachment objects are removed after their one-time download or scheduled cleanup.</p>
           <p>cryptoscreen keeps minimal delivery status so the app can show whether a sent message was consumed, expired, destroyed, or reported a screenshot event when reciprocal interaction status is enabled. That status does not include plaintext, image plaintext, PINs, link secrets, sender contacts, or recipient contacts.</p>
         </div>
@@ -2013,6 +2162,47 @@ function securityPage(env: Env): string {
   );
 }
 
+function transparencyPage(env: Env): string {
+  return pageShell(
+    "Transparency",
+    env,
+    `
+      <section class="panel prose">
+        <p class="eyebrow">Transparency</p>
+        <h1>What the database sees</h1>
+        <p>cryptoscreen is designed so the hosted service stores encrypted payloads only. A database row alone, or a database row plus the PIN alone, is not enough to decrypt a message.</p>
+
+        <h2>Text messages</h2>
+        <p>The app encrypts the message on the sender's device before upload. The server receives fields shaped like this:</p>
+        <pre><code>{
+  "id": "message uuid",
+  "ciphertext": "encrypted message bytes",
+  "nonce": "AES-GCM nonce",
+  "tag": "AES-GCM tag",
+  "salt": "per-message salt",
+  "pin_verifier": "server-peppered PIN proof",
+  "read_policy": "app_only or web_allowed",
+  "expires_at": "30 day maximum"
+}</code></pre>
+        <p>That row does not contain the plaintext, raw PIN, link secret, sender identity, recipient identity, contacts, or account profile.</p>
+
+        <h2>What can decrypt</h2>
+        <ul class="security-list">
+          <li>Database row only: cannot decrypt.</li>
+          <li>Database row plus PIN: cannot decrypt because the link secret is missing.</li>
+          <li>Database row plus link secret plus PIN: can decrypt locally in the app.</li>
+        </ul>
+
+        <h2>Images</h2>
+        <p>Images follow the same boundary. The app encrypts the image before upload. R2 stores encrypted image bytes. Neon stores the object key, encrypted file-key bytes, size, content type, and expiry metadata. The raw image and raw image key are not stored by the service.</p>
+
+        <h2>One-time opening</h2>
+        <p>After a correct PIN proof, the database function returns the encrypted payload and deletes the normal message row in the same locked operation. The third wrong PIN destroys the row. Unopened links expire after ${LINK_RETENTION_DAYS} days.</p>
+      </section>
+    `
+  );
+}
+
 function supportPage(env: Env): string {
   const links = siteLinks(env);
 
@@ -2051,7 +2241,7 @@ function notFoundPage(env: Env): string {
   );
 }
 
-function pageShell(title: string, env: Env, content: string, preserveFragment = false, bodyScript = ""): string {
+function pageShell(title: string, env: Env, content: string, preserveFragment = false, bodyScript = "", includeSmartAppBanner = false): string {
   const escapedTitle = escapeHtml(title);
   const description = "cryptoscreen seals one-time encrypted messages for private reading on iPhone.";
   const links = siteLinks(env);
@@ -2074,10 +2264,11 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     <meta property="og:type" content="website">
     <meta name="twitter:card" content="app">
     <meta name="twitter:site" content="${escapeAttribute(xHandle)}">
-    <meta name="twitter:description" content="${escapeAttribute(description)}">
-    <meta name="twitter:app:name:iphone" content="cryptoscreen">
-    <meta name="twitter:app:id:iphone" content="${escapeAttribute(appleAppId)}">
-    <title>${escapedTitle}</title>
+	    <meta name="twitter:description" content="${escapeAttribute(description)}">
+	    <meta name="twitter:app:name:iphone" content="cryptoscreen">
+	    <meta name="twitter:app:id:iphone" content="${escapeAttribute(appleAppId)}">
+	    ${includeSmartAppBanner ? smartAppBannerMeta(env) : ""}
+	    <title>${escapedTitle}</title>
     <style>
       @font-face {
         font-family: "Alpha Lyrae";
@@ -2458,6 +2649,18 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       }
       .prose h2 { font-size: 24px; margin: 30px 0 10px; }
       .prose p + p { margin-top: 16px; }
+      .prose pre {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--bg-2);
+        color: var(--soft-ink);
+        font-size: 13px;
+        line-height: 1.55;
+        margin: 18px 0;
+        overflow-x: auto;
+        padding: 14px;
+      }
+      .prose pre code { color: inherit; }
       .note {
         border: 1px solid oklch(79% 0.21 152 / 0.28);
         border-radius: 8px;
@@ -2482,9 +2685,70 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         margin-top: 14px;
         padding: 12px 13px;
       }
-      .browser-warning[hidden] {
-        display: none;
-      }
+	      .browser-warning[hidden] {
+	        display: none;
+	      }
+	      .browser-reader {
+	        display: grid;
+	        gap: 12px;
+	        margin-top: 24px;
+	      }
+	      .browser-reader[hidden] {
+	        display: none;
+	      }
+	      .input-label {
+	        color: var(--soft-ink);
+	        font-size: 13px;
+	        font-weight: 800;
+	        text-transform: uppercase;
+	      }
+	      input {
+	        background: var(--bg-2);
+	        border: 1px solid var(--line);
+	        border-radius: 8px;
+	        color: var(--ink);
+	        font: 700 28px/1 ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+	        letter-spacing: 0;
+	        max-width: 220px;
+	        padding: 13px 14px;
+	      }
+	      input:focus {
+	        border-color: var(--accent);
+	        outline: 2px solid oklch(79% 0.21 152 / 0.18);
+	        outline-offset: 2px;
+	      }
+	      .message-output {
+	        border-top: 1px solid var(--line);
+	        display: grid;
+	        gap: 14px;
+	        margin-top: 26px;
+	        padding-top: 22px;
+	      }
+	      .message-output[hidden] {
+	        display: none;
+	      }
+	      .message-output pre {
+	        background: var(--bg-2);
+	        border: 1px solid var(--line);
+	        border-radius: 8px;
+	        color: var(--ink);
+	        font: 16px/1.55 ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+	        margin: 0;
+	        overflow-wrap: anywhere;
+	        padding: 16px;
+	        white-space: pre-wrap;
+	        user-select: none;
+	      }
+	      .message-output img {
+	        border: 1px solid var(--line);
+	        border-radius: 8px;
+	        max-height: 70vh;
+	        max-width: 100%;
+	        object-fit: contain;
+	      }
+	      .message-output img[hidden] {
+	        display: none;
+	      }
       footer {
         border-top: 1px solid var(--line);
         color: var(--muted);
@@ -2546,6 +2810,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         <nav aria-label="Main">
           <a href="/privacy">Privacy</a>
           <a href="/security">Security</a>
+          <a href="/transparency">Transparency</a>
           <a href="/terms">Terms</a>
           <a href="/support">Support</a>
           <a href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
@@ -2560,6 +2825,8 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
           <a href="/privacy">Privacy</a>
           &nbsp;/&nbsp;
           <a href="/security">Security</a>
+          &nbsp;/&nbsp;
+          <a href="/transparency">Transparency</a>
           &nbsp;/&nbsp;
           <a href="/terms">Terms</a>
           &nbsp;/&nbsp;
@@ -2653,6 +2920,253 @@ function fragmentForwardingScript(): string {
   });
 })();
 </script>`;
+}
+
+function messageReaderScript(): string {
+  return `<script>
+(() => {
+  const messageID = document.querySelector("[data-message-id]")?.getAttribute("data-message-id") || "";
+  const openMessage = document.querySelector("[data-open-message]");
+  const appClipLink = document.querySelector("[data-app-clip]");
+  const openState = document.querySelector("[data-open-state]");
+  const reader = document.querySelector("[data-browser-reader]");
+  const pinInput = document.querySelector("[data-pin]");
+  const readerStatus = document.querySelector("[data-reader-status]");
+  const output = document.querySelector("[data-message-output]");
+  const plaintextOutput = document.querySelector("[data-plaintext]");
+  const attachmentOutput = document.querySelector("[data-attachment]");
+
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const sameLink = () => window.location.href;
+  const setStatus = (message) => {
+    if (readerStatus) readerStatus.textContent = message;
+  };
+  const setOpenState = (message) => {
+    if (openState) openState.textContent = message;
+  };
+
+  if (openMessage) openMessage.href = sameLink();
+  if (appClipLink) appClipLink.href = sameLink();
+
+  const maybeTryApp = () => {
+    if (!isIOS || !openMessage) return;
+    const key = "cryptoscreen.openAttempt." + messageID + "." + window.location.hash;
+    if (sessionStorage.getItem(key) === "1") return;
+    sessionStorage.setItem(key, "1");
+    setOpenState("Trying to open cryptoscreen on this iPhone...");
+    window.setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        openMessage.click();
+      }
+    }, 250);
+    window.setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        setOpenState("If cryptoscreen did not open, use the App Clip or install the app.");
+      }
+    }, 1500);
+  };
+
+  const base64UrlToBytes = (value) => {
+    const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  };
+
+  const bytesToBase64Url = (bytes) => {
+    let binary = "";
+    bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+    return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  };
+
+  const concatBytes = (...parts) => {
+    const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
+    const combined = new Uint8Array(total);
+    let offset = 0;
+    parts.forEach((part) => {
+      combined.set(part, offset);
+      offset += part.byteLength;
+    });
+    return combined;
+  };
+
+  const fragmentSecret = () => {
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const secret = fragment.get("s");
+    if (!secret) throw new Error("missing_secret");
+    const bytes = base64UrlToBytes(secret);
+    if (bytes.byteLength < 32) throw new Error("invalid_secret");
+    return bytes;
+  };
+
+  const deriveBits = async (linkSecret, pin, salt, info) => {
+    const pinBytes = new TextEncoder().encode(pin);
+    const inputKeyMaterial = concatBytes(linkSecret, pinBytes);
+    const baseKey = await crypto.subtle.importKey("raw", inputKeyMaterial, "HKDF", false, ["deriveBits"]);
+    return new Uint8Array(await crypto.subtle.deriveBits({
+      name: "HKDF",
+      hash: "SHA-256",
+      salt,
+      info: new TextEncoder().encode(info)
+    }, baseKey, 256));
+  };
+
+  const makePinProof = async (linkSecret, pin) => {
+    const verifierKeyBytes = await deriveBits(
+      linkSecret,
+      pin,
+      new TextEncoder().encode("cryptoscreen pin proof salt v1"),
+      "cryptoscreen pin verifier v1"
+    );
+    const verifierKey = await crypto.subtle.importKey("raw", verifierKeyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const signature = await crypto.subtle.sign("HMAC", verifierKey, new TextEncoder().encode("cryptoscreen pin proof"));
+    return new Uint8Array(signature);
+  };
+
+  const deriveContentKey = async (linkSecret, pin, salt) => {
+    const keyBytes = await deriveBits(linkSecret, pin, salt, "cryptoscreen content key v1");
+    return await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["decrypt"]);
+  };
+
+  const decryptAesGcm = async (key, nonce, ciphertext, tag) => {
+    const combined = concatBytes(ciphertext, tag);
+    return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, key, combined));
+  };
+
+  const decryptCombinedAesGcm = async (key, combined) => {
+    if (combined.byteLength <= 28) throw new Error("invalid_payload");
+    const nonce = combined.slice(0, 12);
+    const ciphertextWithTag = combined.slice(12);
+    return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, key, ciphertextWithTag));
+  };
+
+  const showReader = () => {
+    if (!reader) return;
+    if (!window.crypto || !crypto.subtle) {
+      setStatus("This browser cannot use Web Crypto. Open the message in cryptoscreen.");
+      return;
+    }
+    reader.hidden = false;
+    setStatus(isIOS ? "The app is the safer option. Browser reading is available because the sender allowed it." : "Browser reading is available because the sender allowed it.");
+  };
+
+  const loadStatus = async () => {
+    try {
+      const response = await fetch("/api/messages/" + encodeURIComponent(messageID) + "/status", {
+        cache: "no-store",
+        headers: { Accept: "application/json" }
+      });
+      if (!response.ok) throw new Error("status_failed");
+      const data = await response.json();
+      if (data.status !== "active") {
+        setOpenState("This message is " + data.status + ".");
+        setStatus("It cannot be opened from the browser or app anymore.");
+        return;
+      }
+      if (data.readPolicy === "web_allowed") {
+        setOpenState(isIOS ? "Open in cryptoscreen, or read here if the app is not available." : "This message can be read in this browser.");
+        showReader();
+        return;
+      }
+      setOpenState("This message is app only.");
+      setStatus(isIOS ? "Use cryptoscreen or the App Clip to open it." : "This message can only be opened on iPhone with cryptoscreen or the App Clip.");
+    } catch {
+      setOpenState("Open in cryptoscreen to continue.");
+      setStatus("Could not check browser availability.");
+    }
+  };
+
+  const openAttachment = async (attachment, contentKey) => {
+    if (!attachment || !attachmentOutput) return;
+    const keyPayload = base64UrlToBytes(attachment.encryptedFileKey);
+    const imageKeyBytes = await decryptCombinedAesGcm(contentKey, keyPayload);
+    const imageKey = await crypto.subtle.importKey("raw", imageKeyBytes, "AES-GCM", false, ["decrypt"]);
+    const response = await fetch(attachment.downloadPath, { cache: "no-store" });
+    if (!response.ok) throw new Error("attachment_unavailable");
+    const encryptedImage = new Uint8Array(await response.arrayBuffer());
+    const imageBytes = await decryptCombinedAesGcm(imageKey, encryptedImage);
+    const blob = new Blob([imageBytes], { type: attachment.contentType || "application/octet-stream" });
+    attachmentOutput.src = URL.createObjectURL(blob);
+    attachmentOutput.hidden = false;
+  };
+
+  if (reader) {
+    reader.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const pin = String(pinInput?.value || "").replace(/\\D/g, "").slice(0, 6);
+      if (pinInput) pinInput.value = pin;
+      if (pin.length !== 6) {
+        setStatus("Enter the six-digit PIN from the sender.");
+        return;
+      }
+      try {
+        reader.querySelector("button")?.setAttribute("disabled", "disabled");
+        setStatus("Opening...");
+        const linkSecret = fragmentSecret();
+        const pinProof = await makePinProof(linkSecret, pin);
+        const response = await fetch("/api/messages/" + encodeURIComponent(messageID) + "/consume", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            pinProof: bytesToBase64Url(pinProof),
+            clientOptIn: false,
+            readerClient: "web"
+          })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (data?.error?.code === "app_only_message") {
+            setStatus("This message can only be opened in cryptoscreen or the App Clip.");
+            return;
+          }
+          throw new Error(data?.error?.message || "open_failed");
+        }
+        if (data.status === "wrong_pin") {
+          setStatus("Wrong PIN. " + (data.remainingAttempts || 0) + " attempts remaining.");
+          return;
+        }
+        if (data.status !== "opened") {
+          setStatus("This message is " + data.status + ".");
+          return;
+        }
+        const salt = base64UrlToBytes(data.salt);
+        const contentKey = await deriveContentKey(linkSecret, pin, salt);
+        const plaintextBytes = await decryptAesGcm(
+          contentKey,
+          base64UrlToBytes(data.nonce),
+          base64UrlToBytes(data.ciphertext),
+          base64UrlToBytes(data.tag)
+        );
+        if (plaintextOutput) plaintextOutput.textContent = new TextDecoder().decode(plaintextBytes);
+        if (output) output.hidden = false;
+        reader.hidden = true;
+        setStatus("Message opened. This read consumed the server row.");
+        await openAttachment(data.attachment, contentKey);
+      } catch {
+        setStatus("The message could not be opened here. Check the PIN or open it in cryptoscreen.");
+      } finally {
+        reader.querySelector("button")?.removeAttribute("disabled");
+      }
+    });
+  }
+
+  maybeTryApp();
+  loadStatus();
+})();
+</script>`;
+}
+
+function smartAppBannerMeta(env: Env): string {
+  const vars = env as unknown as Record<string, string | undefined>;
+  const appClipBundleID = vars.APP_CLIP_BUNDLE_ID;
+  const parts = [`app-id=${appleAppStoreId(env)}`];
+  if (appClipBundleID) {
+    parts.push(`app-clip-bundle-id=${appClipBundleID}`);
+  }
+
+  return `<meta name="apple-itunes-app" content="${escapeAttribute(parts.join(", "))}">`;
 }
 
 function siteLinks(env: Env): {

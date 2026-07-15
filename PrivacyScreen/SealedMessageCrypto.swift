@@ -31,6 +31,29 @@ struct SealedImageAttachmentUpload: Equatable {
   let originalByteCount: Int
 }
 
+enum SealedMessageReadPolicy: String, CaseIterable, Codable, Equatable {
+  case appOnly = "app_only"
+  case webAllowed = "web_allowed"
+
+  var title: String {
+    switch self {
+    case .appOnly:
+      return "App only"
+    case .webAllowed:
+      return "App or web"
+    }
+  }
+
+  var detail: String {
+    switch self {
+    case .appOnly:
+      return "Recipient opens in cryptoscreen or the App Clip."
+    case .webAllowed:
+      return "Recipient can fall back to browser reading."
+    }
+  }
+}
+
 struct OpenedSealedMessagePayload: Equatable {
   let ciphertext: Data
   let nonce: Data

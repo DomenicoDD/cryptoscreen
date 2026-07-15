@@ -6,6 +6,7 @@ struct MessagesComposeView: View {
   @ObservedObject var context: MessagesComposeContext
 
   @AppStorage("cryptoscreen.messages.sharePINSeparately") private var sharePINSeparately = false
+  @AppStorage("cryptoscreen.messages.readPolicy") private var readPolicyRawValue = SealedMessageReadPolicy.appOnly.rawValue
   @StateObject private var proImageEntitlements = ProImageEntitlementStore()
   @State private var message = ""
   @State private var pin = ""
@@ -43,6 +44,10 @@ struct MessagesComposeView: View {
     !isSealing
   }
 
+  private var readPolicy: SealedMessageReadPolicy {
+    SealedMessageReadPolicy(rawValue: readPolicyRawValue) ?? .appOnly
+  }
+
   var body: some View {
     NavigationStack {
       Group {
@@ -54,6 +59,7 @@ struct MessagesComposeView: View {
             VStack(alignment: .leading, spacing: 14) {
               messageSection
               imageSection
+              readPolicySection
               pinSection
               sharePINSection
               actionSection
@@ -256,6 +262,33 @@ struct MessagesComposeView: View {
     }
   }
 
+  private var readPolicySection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Read availability")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+
+      Picker("Read availability", selection: $readPolicyRawValue) {
+        ForEach(SealedMessageReadPolicy.allCases, id: \.rawValue) { policy in
+          Text(policy.title).tag(policy.rawValue)
+        }
+      }
+      .pickerStyle(.segmented)
+      .onChange(of: readPolicyRawValue) { _, _ in
+        createdMessage = nil
+        statusText = nil
+      }
+
+      Text(readPolicy.detail)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+    .padding(12)
+    .background(Color.white.opacity(0.08))
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
   private var sharePINSection: some View {
     Toggle(isOn: $sharePINSeparately) {
       VStack(alignment: .leading, spacing: 2) {
@@ -383,7 +416,7 @@ struct MessagesComposeView: View {
         imageAttachment = nil
       }
 
-      let createdMessage = try await sender.create(upload: upload, imageAttachment: imageAttachment)
+      let createdMessage = try await sender.create(upload: upload, imageAttachment: imageAttachment, readPolicy: readPolicy)
 
       do {
         try await context.insertSealedMessage(

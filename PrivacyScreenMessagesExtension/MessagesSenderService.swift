@@ -6,7 +6,11 @@ struct MessagesSenderService {
   let baseURL: URL
   var session: URLSession = .shared
 
-  func create(upload: SealedMessageUpload, imageAttachment: SealedImageAttachmentUpload? = nil) async throws -> CreatedSealedMessage {
+  func create(
+    upload: SealedMessageUpload,
+    imageAttachment: SealedImageAttachmentUpload? = nil,
+    readPolicy: SealedMessageReadPolicy = .appOnly
+  ) async throws -> CreatedSealedMessage {
     let body = MessagesCreateMessageRequest(
       ciphertext: upload.ciphertext.base64URLEncodedString(),
       nonce: upload.nonce.base64URLEncodedString(),
@@ -14,6 +18,7 @@ struct MessagesSenderService {
       salt: upload.salt.base64URLEncodedString(),
       pinProof: upload.pinProof.base64URLEncodedString(),
       revokeProof: upload.revokeProof.base64URLEncodedString(),
+      readPolicy: readPolicy.rawValue,
       ttlSeconds: Int(SealedMessageCrypto.defaultTimeToLive)
     )
 
@@ -124,6 +129,7 @@ private struct MessagesCreateMessageRequest: Encodable {
   let salt: String
   let pinProof: String
   let revokeProof: String
+  let readPolicy: String
   let ttlSeconds: Int
 }
 

@@ -114,6 +114,7 @@ create table cryptoscreen.sealed_messages (
   pin_verifier bytea not null,
   failed_attempts smallint not null default 0,
   max_attempts smallint not null default 3,
+  read_policy cryptoscreen.sealed_message_read_policy not null default 'app_only',
   expires_at timestamptz not null,
   created_at timestamptz not null default now()
 );
@@ -242,9 +243,11 @@ Minimum endpoints:
 POST /api/messages
 ```
 
-Creates a sealed message. Request contains ciphertext, nonce, tag, salt, TTL, and the raw client PIN proof. The Worker stores only `HMAC(SERVER_PIN_PEPPER, pin_proof)`. Response contains the message id.
+Creates a sealed message. Request contains ciphertext, nonce, tag, salt, TTL, read policy, and the raw client PIN proof. The Worker stores only `HMAC(SERVER_PIN_PEPPER, pin_proof)`. Response contains the message id.
 
 The production TTL limit is 30 days. Clients may request a shorter TTL, but unopened user links cannot be retained longer than 30 days. Service-owned retained demo/review rows are excluded from expiry cleanup and must not contain private user content.
+
+`read_policy` is `app_only` by default. If the sender chooses `web_allowed`, the hosted `/m/<id>` page may offer browser-side decryption. App-only messages should be opened in the iOS app or App Clip; the public web reader refuses them.
 
 ```text
 POST /api/messages/{id}/consume
