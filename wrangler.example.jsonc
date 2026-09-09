@@ -34,6 +34,7 @@
   "vars": {
     "ENVIRONMENT": "production",
     "APP_BASE_URL": "https://example.com",
+    "WEB_BASE_URL": "https://www.example.com",
     "APPLE_APP_ID": "<YOUR_APP_STORE_ID>",
     "APPLE_TEAM_ID": "<YOUR_APPLE_TEAM_ID>",
     "IOS_BUNDLE_ID": "com.example.cryptoscreen",

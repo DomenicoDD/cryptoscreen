@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-v2wTEx2cm/YBT8RuLe+AF5v2/XwDXSk4ZYmWmn65LxA=' 'sha256-SAjLnFQGRwYRCTsTMsZBXzcU7aJLILgc12XqCVerAnc='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -1188,6 +1188,7 @@ async function messageStatus(env: Env, messageID: string): Promise<Response> {
       select id, read_policy
       from cryptoscreen.sealed_messages
       where id = ${messageID}::uuid
+        and (retained or expires_at > now())
       limit 1
     )
     select
@@ -1960,7 +1961,7 @@ async function homePage(env: Env): Promise<string> {
             </div>
           </div>
           <div class="actions">
-            <a class="button primary" href="${escapeAttribute(links.appStoreUrl)}" rel="noreferrer">Download on the App Store</a>
+            <a class="button primary" data-ios-only href="${escapeAttribute(links.appStoreUrl)}" rel="noreferrer">Download on the App Store</a>
             <a class="button" href="/support">Support</a>
             <a class="button ghost" href="/transparency">Transparency</a>
             <a class="button ghost" href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
@@ -2021,9 +2022,26 @@ async function homePage(env: Env): Promise<string> {
 
 function messagePage(url: URL, env: Env): string {
   const rawMessageID = url.pathname.split("/").pop() ?? "";
-  const messageID = escapeHtml(rawMessageID);
   const messageUrl = messageUrlWithoutFragment(url, env);
+  const webUrl = new URL(url.pathname, env.WEB_BASE_URL).href;
+  const clipUrl = `${messageUrl}?clip=1`;
+  const clipPage = url.origin === siteBaseUrl(env).origin && url.searchParams.get("clip") === "1";
+  const messageLinks = { appUrl: messageUrl, webUrl, clipPage, appClipBanner: url.origin === siteBaseUrl(env).origin };
   const links = siteLinks(env);
+
+  if (clipPage) {
+    return pageShell("Open App Clip", env, `
+      <section class="panel">
+        <p class="eyebrow">Sealed message</p>
+        <h1>Open with App Clip</h1>
+        <p data-ios-help>Tap Open in the App Clip card or Safari banner to read your message without installing the full app.</p>
+        <p class="hint">If the card is unavailable, open this page in Safari outside Private Browsing, or return to the message for other options.</p>
+        <div class="actions">
+          <a class="button primary" data-message-link href="${escapeAttribute(webUrl)}">Back to message</a>
+          <a class="button" data-ios-only href="${escapeAttribute(links.appStoreUrl)}">Download on the App Store</a>
+        </div>
+      </section>`, true, "", messageLinks);
+  }
 
   return pageShell(
     "Open sealed message",
@@ -2031,38 +2049,38 @@ function messagePage(url: URL, env: Env): string {
     `
       <section class="panel" data-message-id="${escapeAttribute(rawMessageID)}">
         <p class="eyebrow">Sealed message</p>
-        <h1>Open in cryptoscreen</h1>
+        <h1>Open your message</h1>
         <p>
-          This link points to message <code>${messageID}</code>. cryptoscreen will try the iOS app first. If the sender allowed browser reading, you can also unlock it here with the six-digit PIN.
+          Read with cryptoscreen on iPhone, or enter the six-digit PIN here if the sender allowed browser reading.
         </p>
-        <p class="note">
-          The decryption secret belongs in the URL fragment after <code>#s=</code>. Browsers do not send that fragment to this server.
-        </p>
-        <div class="actions" data-app-actions>
-          <a class="button primary" data-open-message href="${escapeAttribute(messageUrl)}">Open in app</a>
-          <a class="button" data-app-clip href="${escapeAttribute(messageUrl)}">Open App Clip</a>
+        <div class="actions" data-app-actions hidden>
+          <a class="button primary" data-open-message data-message-link href="${escapeAttribute(messageUrl)}">Open in app</a>
+          <a class="button" data-app-clip data-message-link href="${escapeAttribute(clipUrl)}">Open App Clip</a>
           <a class="button" href="${escapeAttribute(links.appStoreUrl)}">Download on the App Store</a>
         </div>
+        <p class="hint" data-ios-help>If the app does not open from this browser, open this page in Safari and tap Open in app.</p>
+        <noscript><p>Enable JavaScript to open this message. You can also open the original link from Messages on an iPhone.</p></noscript>
         <p class="hint" data-open-state>Checking this message...</p>
         <form class="browser-reader" data-browser-reader hidden>
           <label class="input-label" for="pin">Six-digit PIN</label>
           <input id="pin" name="pin" type="text" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" maxlength="6" placeholder="000000" data-pin>
           <button class="button primary" type="submit">Read in browser</button>
           <p class="browser-warning">
-            Browser reading has lower protection than the iOS app. The server still does not receive the link secret or plaintext, but Safari cannot provide the app's capture shielding.
+            Reading consumes this message. Keep this page open until you finish. Browsers cannot provide the iOS app's screenshot and screen-recording protections.
           </p>
         </form>
         <div class="message-output" data-message-output hidden>
           <p class="eyebrow">Message</p>
           <pre data-plaintext></pre>
           <img data-attachment alt="Encrypted attachment" hidden>
+          <button class="button" type="button" data-close-message>Close and clear message</button>
         </div>
         <p class="hint" data-reader-status></p>
       </section>
     `,
     true,
     messageReaderScript(),
-    true
+    messageLinks
   );
 }
 
@@ -2329,7 +2347,9 @@ function notFoundPage(env: Env): string {
   );
 }
 
-function pageShell(title: string, env: Env, content: string, preserveFragment = false, bodyScript = "", includeSmartAppBanner = false): string {
+type MessagePageLinks = { appUrl: string; webUrl: string; clipPage: boolean; appClipBanner: boolean };
+
+function pageShell(title: string, env: Env, content: string, preserveFragment = false, bodyScript = "", messageLinks?: MessagePageLinks): string {
   const escapedTitle = escapeHtml(title);
   const description = "cryptoscreen seals one-time encrypted messages for private reading on iPhone.";
   const links = siteLinks(env);
@@ -2341,7 +2361,10 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    ${preserveFragment ? fragmentForwardingScript() : ""}
+    ${messageLinks ? `<meta name="cryptoscreen-app-url" content="${escapeAttribute(messageLinks.appUrl)}">
+    <meta name="cryptoscreen-web-url" content="${escapeAttribute(messageLinks.webUrl)}">
+    ${smartAppBannerMeta(env, messageLinks)}` : ""}
+    ${fragmentForwardingScript()}
     <meta name="description" content="${escapeAttribute(description)}">
     <meta name="theme-color" content="#08100b">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
@@ -2350,12 +2373,13 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     <meta property="og:title" content="${escapedTitle}">
     <meta property="og:description" content="${escapeAttribute(description)}">
     <meta property="og:type" content="website">
+    <meta property="og:image" content="${escapeAttribute(siteBaseUrl(env).origin)}/icons/icon-512.png">
+    ${preserveFragment ? '<meta name="robots" content="noindex, nofollow, noarchive">' : ""}
     <meta name="twitter:card" content="app">
     <meta name="twitter:site" content="${escapeAttribute(xHandle)}">
 	    <meta name="twitter:description" content="${escapeAttribute(description)}">
 	    <meta name="twitter:app:name:iphone" content="cryptoscreen">
 	    <meta name="twitter:app:id:iphone" content="${escapeAttribute(appleAppId)}">
-	    ${includeSmartAppBanner ? smartAppBannerMeta(env) : ""}
 	    <title>${escapedTitle}</title>
     <style>
       @font-face {
@@ -2383,6 +2407,8 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         --blue: oklch(77% 0.1 240);
       }
       * { box-sizing: border-box; }
+      [hidden], html.is-android [data-ios-only] { display: none !important; }
+      html:not(.is-ios) [data-ios-help] { display: none; }
       html { background: var(--bg); }
       body {
         margin: 0;
@@ -2937,7 +2963,7 @@ function formatStatNumber(value: number): string {
 
 function messageUrlWithoutFragment(url: URL, env: Env): string {
   const baseUrl = siteBaseUrl(env);
-  return `${baseUrl.origin}${url.pathname}${url.search}`;
+  return `${baseUrl.origin}${url.pathname}`;
 }
 
 function siteBaseUrl(env: Env): URL {
@@ -3002,10 +3028,37 @@ function homeStatsScript(): string {
 function fragmentForwardingScript(): string {
   return `<script>
 (() => {
-  window.addEventListener("DOMContentLoaded", () => {
-    const openMessage = document.querySelector("[data-open-message]");
-    if (openMessage) openMessage.href = window.location.href;
-  });
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const isIOS = !isAndroid && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  document.documentElement.classList.toggle("is-android", isAndroid);
+  document.documentElement.classList.toggle("is-ios", isIOS);
+  const appMeta = document.querySelector('meta[name="cryptoscreen-app-url"]');
+  const webMeta = document.querySelector('meta[name="cryptoscreen-web-url"]');
+  if (!appMeta || !webMeta) return;
+  const appURL = new URL(appMeta.content);
+  const webURL = new URL(webMeta.content);
+  const currentURL = new URL(window.location.href);
+  const clipPage = currentURL.origin === appURL.origin && currentURL.searchParams.get("clip") === "1";
+  // The secret stays in the fragment, including while crossing our two hosts.
+  appURL.hash = currentURL.hash;
+  webURL.hash = currentURL.hash;
+  // A real tap from www to the associated apex domain can open existing app versions.
+  // Never synthesize a click or redirect again from the explicit App Clip card page.
+  if (isIOS && currentURL.origin === appURL.origin && webURL.origin !== appURL.origin && !clipPage) {
+    window.location.replace(webURL.href);
+    return;
+  }
+  const banner = document.querySelector('meta[name="apple-itunes-app"]');
+  if (banner) banner.content = banner.content.replace(/app-argument=[^,]*/, "app-argument=" + appURL.href);
+  const forwardFragment = () => {
+    document.querySelectorAll("[data-message-link]").forEach((link) => {
+      const destination = new URL(link.href);
+      destination.hash = window.location.hash;
+      link.href = destination.href;
+    });
+  };
+  window.addEventListener("DOMContentLoaded", forwardFragment);
+  window.addEventListener("hashchange", forwardFragment);
 })();
 </script>`;
 }
@@ -3014,8 +3067,7 @@ function messageReaderScript(): string {
   return `<script>
 (() => {
   const messageID = document.querySelector("[data-message-id]")?.getAttribute("data-message-id") || "";
-  const openMessage = document.querySelector("[data-open-message]");
-  const appClipLink = document.querySelector("[data-app-clip]");
+  const appActions = document.querySelector("[data-app-actions]");
   const openState = document.querySelector("[data-open-state]");
   const reader = document.querySelector("[data-browser-reader]");
   const pinInput = document.querySelector("[data-pin]");
@@ -3024,8 +3076,12 @@ function messageReaderScript(): string {
   const plaintextOutput = document.querySelector("[data-plaintext]");
   const attachmentOutput = document.querySelector("[data-attachment]");
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  const sameLink = () => window.location.href;
+  const isIOS = document.documentElement.classList.contains("is-ios");
+  let opening = false;
+  let consumed = false;
+  let browserAllowed = false;
+  let attachmentURL = null;
+  let pageClosed = false;
   const setStatus = (message) => {
     if (readerStatus) readerStatus.textContent = message;
   };
@@ -3033,26 +3089,7 @@ function messageReaderScript(): string {
     if (openState) openState.textContent = message;
   };
 
-  if (openMessage) openMessage.href = sameLink();
-  if (appClipLink) appClipLink.href = sameLink();
-
-  const maybeTryApp = () => {
-    if (!isIOS || !openMessage) return;
-    const key = "cryptoscreen.openAttempt." + messageID + "." + window.location.hash;
-    if (sessionStorage.getItem(key) === "1") return;
-    sessionStorage.setItem(key, "1");
-    setOpenState("Trying to open cryptoscreen on this iPhone...");
-    window.setTimeout(() => {
-      if (document.visibilityState === "visible") {
-        openMessage.click();
-      }
-    }, 250);
-    window.setTimeout(() => {
-      if (document.visibilityState === "visible") {
-        setOpenState("If cryptoscreen did not open, use the App Clip or install the app.");
-      }
-    }, 1500);
-  };
+  if (appActions) appActions.hidden = !isIOS;
 
   const base64UrlToBytes = (value) => {
     const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
@@ -3084,6 +3121,7 @@ function messageReaderScript(): string {
     const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const secret = fragment.get("s");
     if (!secret) throw new Error("missing_secret");
+    if (!/^[A-Za-z0-9_-]+={0,2}$/.test(secret)) throw new Error("invalid_secret");
     const bytes = base64UrlToBytes(secret);
     if (bytes.byteLength < 32) throw new Error("invalid_secret");
     return bytes;
@@ -3131,7 +3169,13 @@ function messageReaderScript(): string {
   };
 
   const showReader = () => {
-    if (!reader) return;
+    if (!reader || consumed || pageClosed) return;
+    try {
+      fragmentSecret();
+    } catch {
+      setStatus("This link is incomplete. Open the full link from the sender, including everything after #s=.");
+      return;
+    }
     if (!window.crypto || !crypto.subtle) {
       setStatus("This browser cannot use Web Crypto. Open the message in cryptoscreen.");
       return;
@@ -3141,6 +3185,7 @@ function messageReaderScript(): string {
   };
 
   const loadStatus = async () => {
+    if (opening || consumed || pageClosed) return;
     try {
       const response = await fetch("/api/messages/" + encodeURIComponent(messageID) + "/status", {
         cache: "no-store",
@@ -3148,21 +3193,27 @@ function messageReaderScript(): string {
       });
       if (!response.ok) throw new Error("status_failed");
       const data = await response.json();
+      if (opening || consumed || pageClosed) return;
+      browserAllowed = false;
+      if (reader) reader.hidden = true;
       if (data.status !== "active") {
+        if (appActions) appActions.hidden = true;
         setOpenState("This message is " + data.status + ".");
         setStatus("It cannot be opened from the browser or app anymore.");
         return;
       }
       if (data.readPolicy === "web_allowed") {
+        browserAllowed = true;
         setOpenState(isIOS ? "Open in cryptoscreen, or read here if the app is not available." : "This message can be read in this browser.");
         showReader();
         return;
       }
       setOpenState("This message is app only.");
-      setStatus(isIOS ? "Use cryptoscreen or the App Clip to open it." : "This message can only be opened on iPhone with cryptoscreen or the App Clip.");
+      setStatus(isIOS ? "Tap Open in app, or use the App Clip if the app is not installed." : "The sender restricted this message to iPhone. Ask them to create a new message with App or web selected to read it on this device.");
     } catch {
-      setOpenState("Open in cryptoscreen to continue.");
-      setStatus("Could not check browser availability.");
+      if (opening || consumed || pageClosed) return;
+      setOpenState("Could not check this message.");
+      setStatus("Check your connection and reload this page." + (isIOS ? " You can also open it in cryptoscreen." : ""));
     }
   };
 
@@ -3175,14 +3226,45 @@ function messageReaderScript(): string {
     if (!response.ok) throw new Error("attachment_unavailable");
     const encryptedImage = new Uint8Array(await response.arrayBuffer());
     const imageBytes = await decryptCombinedAesGcm(imageKey, encryptedImage);
+    if (pageClosed) return;
     const blob = new Blob([imageBytes], { type: attachment.contentType || "application/octet-stream" });
-    attachmentOutput.src = URL.createObjectURL(blob);
+    attachmentURL = URL.createObjectURL(blob);
+    attachmentOutput.src = attachmentURL;
+    attachmentOutput.onerror = () => {
+      setStatus("The text is open, but this browser cannot display the attached image format. The message has already been consumed.");
+    };
     attachmentOutput.hidden = false;
   };
+
+  const clearMessage = () => {
+    pageClosed = true;
+    if (plaintextOutput) plaintextOutput.textContent = "";
+    if (attachmentOutput) {
+      attachmentOutput.removeAttribute("src");
+      attachmentOutput.hidden = true;
+    }
+    if (attachmentURL) URL.revokeObjectURL(attachmentURL);
+    attachmentURL = null;
+    if (pinInput) pinInput.value = "";
+    if (output) output.hidden = true;
+    if (consumed) setStatus("Message cleared. It cannot be opened again.");
+  };
+  document.querySelector("[data-close-message]")?.addEventListener("click", clearMessage);
+  window.addEventListener("pagehide", clearMessage);
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && !consumed) {
+      pageClosed = false;
+      loadStatus();
+    }
+  });
+  window.addEventListener("hashchange", () => {
+    if (!opening && !consumed && browserAllowed) showReader();
+  });
 
   if (reader) {
     reader.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (opening || consumed || !browserAllowed || pageClosed) return;
       const pin = String(pinInput?.value || "").replace(/\\D/g, "").slice(0, 6);
       if (pinInput) pinInput.value = pin;
       if (pin.length !== 6) {
@@ -3190,6 +3272,7 @@ function messageReaderScript(): string {
         return;
       }
       try {
+        opening = true;
         reader.querySelector("button")?.setAttribute("disabled", "disabled");
         setStatus("Opening...");
         const linkSecret = fragmentSecret();
@@ -3206,6 +3289,8 @@ function messageReaderScript(): string {
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           if (data?.error?.code === "app_only_message") {
+            browserAllowed = false;
+            reader.hidden = true;
             setStatus("This message can only be opened in cryptoscreen or the App Clip.");
             return;
           }
@@ -3216,9 +3301,17 @@ function messageReaderScript(): string {
           return;
         }
         if (data.status !== "opened") {
+          browserAllowed = false;
+          reader.hidden = true;
+          if (appActions) appActions.hidden = true;
           setStatus("This message is " + data.status + ".");
           return;
         }
+        consumed = true;
+        reader.hidden = true;
+        if (appActions) appActions.hidden = true;
+        if (pinInput) pinInput.value = "";
+        setOpenState("Message opened.");
         const salt = base64UrlToBytes(data.salt);
         const contentKey = await deriveContentKey(linkSecret, pin, salt);
         const plaintextBytes = await decryptAesGcm(
@@ -3227,31 +3320,39 @@ function messageReaderScript(): string {
           base64UrlToBytes(data.ciphertext),
           base64UrlToBytes(data.tag)
         );
+        if (pageClosed) return;
         if (plaintextOutput) plaintextOutput.textContent = new TextDecoder().decode(plaintextBytes);
         if (output) output.hidden = false;
         reader.hidden = true;
-        setStatus("Message opened. This read consumed the server row.");
-        await openAttachment(data.attachment, contentKey);
+        setStatus("Read your message before closing this page. It cannot be opened again.");
+        try {
+          await openAttachment(data.attachment, contentKey);
+        } catch {
+          if (!pageClosed) setStatus("The text is open, but the attachment could not be loaded. Keep this page open to finish reading the text.");
+        }
       } catch {
-        setStatus("The message could not be opened here. Check the PIN or open it in cryptoscreen.");
+        if (!pageClosed) setStatus(consumed
+          ? "The message was consumed, but this browser could not decrypt it. Ask the sender to send a new message."
+          : "The message could not be opened. Check your connection and that you have the complete link.");
       } finally {
+        opening = false;
         reader.querySelector("button")?.removeAttribute("disabled");
       }
     });
   }
 
-  maybeTryApp();
   loadStatus();
 })();
 </script>`;
 }
 
-function smartAppBannerMeta(env: Env): string {
+function smartAppBannerMeta(env: Env, links: MessagePageLinks): string {
   const vars = env as unknown as Record<string, string | undefined>;
   const appClipBundleID = vars.APP_CLIP_BUNDLE_ID;
-  const parts = [`app-id=${appleAppStoreId(env)}`];
-  if (appClipBundleID) {
+  const parts = [`app-id=${appleAppStoreId(env)}`, `app-argument=${links.appUrl}`];
+  if (appClipBundleID && links.appClipBanner) {
     parts.push(`app-clip-bundle-id=${appClipBundleID}`);
+    if (links.clipPage) parts.push("app-clip-display=card");
   }
 
   return `<meta name="apple-itunes-app" content="${escapeAttribute(parts.join(", "))}">`;

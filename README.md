@@ -18,6 +18,8 @@ The current app is intentionally small and native. It encrypts messages on devic
 - Destroy the visible reader session after iOS reports a screenshot.
 - Avoid putting plaintext into logs, clipboard actions, share sheets, or accessibility labels.
 - Serve `cryptoscreen.app`, support/privacy pages, and Apple association metadata from Cloudflare Workers.
+- Let the sender choose App only or App or web; supported browsers decrypt web-enabled messages locally.
+- Use `www.cryptoscreen.app` for the iPhone browser fallback and the associated apex domain for native app/App Clip invocation.
 - V2 design work for Pro encrypted image attachments is tracked in [docs/V2_PRO_IMAGES.md](docs/V2_PRO_IMAGES.md).
 
 The app talks only to `https://cryptoscreen.app/api`. It must never connect directly to Neon.
@@ -53,6 +55,8 @@ The product target is App Clip first:
 5. The App Clip asks for the PIN and consumes the message.
 
 The repo includes an App Clip target that reuses the same reader and sealed-message code in an App Clip-specific open flow. Production App Clip release still requires Apple Developer/App Store Connect configuration, Associated Domains, and on-device invocation testing.
+
+See [Links and browser reading](docs/LINKS_AND_BROWSER_READING.md) for the browser-to-app flow, App Clip release requirements, and browser-reader checks.
 
 ## Build
 
@@ -107,6 +111,8 @@ pnpm run types
 pnpm run check
 ```
 
+On macOS with Xcode installed, run `pnpm test` to verify link handling, device-specific actions, browser state, and interoperability with the app's actual Swift CryptoKit encryption.
+
 Required production secrets:
 
 ```text
@@ -150,6 +156,8 @@ SUPPORT_EMAIL
 FEEDBACK_EMAIL
 FEEDBACK_FROM_EMAIL
 ```
+
+`APP_BASE_URL` must be the app's associated HTTPS origin (`https://cryptoscreen.app`). `WEB_BASE_URL` must be the separate browser origin (`https://www.cryptoscreen.app`). Both hosts route to the same Worker. Keep `www` out of the app's `applinks` entitlements so it remains a browser fallback.
 
 `/api/feedback` sends onboarding feedback through a server-side Cloudflare `send_email` binding named `FEEDBACK_EMAIL_SENDER`. The iOS app never receives SMTP or email-provider credentials.
 

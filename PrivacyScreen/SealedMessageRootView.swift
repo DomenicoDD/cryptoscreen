@@ -4,7 +4,7 @@ import UIKit
 
 private let defaultComposeMessage = "Meet me by the north entrance after the second bell. Read this once, then let it burn."
 private let sealedMessageShareSubject = "cryptoscreen sealed note"
-private let sealedMessageShareWarning = "There is an encrypted self-destroying note waiting for you. Beware: if you take a screenshot, the message will be destroyed."
+private let sealedMessageShareWarning = "There is an encrypted one-time note waiting for you. Open it with this link and the PIN from the sender."
 private let maxMessageCharacterCount = 10_000
 private let proImageAttachmentsEnabled = true
 private let demoCardImageAssetName = "DemoCard"
@@ -562,10 +562,20 @@ struct SealedMessageRootView: View {
     }
 #endif
     .onOpenURL { url in
-      incomingLink = url.absoluteString
-      incomingPIN = ""
-      mode = .open
+      receiveMessageURL(url)
     }
+    .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+      guard let url = activity.webpageURL else { return }
+      receiveMessageURL(url)
+    }
+  }
+
+  private func receiveMessageURL(_ url: URL) {
+    guard SealedMessageCrypto.request(from: url) != nil else { return }
+    incomingLink = url.absoluteString
+    incomingPIN = ""
+    mode = .open
+    isShowingOnboarding = false
   }
 
   private func presentOnboarding() {
@@ -1951,12 +1961,9 @@ private struct OpenSealedMessageView: View {
       }
 
       link = newValue
+      pin = ""
     }
     .onChange(of: initialPIN) { _, newValue in
-      guard !newValue.isEmpty else {
-        return
-      }
-
       pin = newValue
     }
   }
