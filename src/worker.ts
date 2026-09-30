@@ -1937,10 +1937,10 @@ async function homePage(env: Env): Promise<string> {
           <img src="/assets/hands-on-screen.svg" width="404" height="396" alt="Hand placement guide illustration from cryptoscreen onboarding">
         </div>
         <div class="hero-copy">
-          <p class="eyebrow">One-time private reading</p>
+          <p class="eyebrow">Now also on the web</p>
           <h1>cryptoscreen</h1>
           <p class="lede">
-            Sealed messages for iPhone. The sender encrypts locally, shares a link and PIN, and the recipient gets one controlled read before the row disappears.
+            Send sealed messages from iPhone. Read them in the app or, when the sender allows it, on the web. Share a link and PIN for one private read before the encrypted message is deleted.
           </p>
           <div class="stat-strip" aria-label="cryptoscreen stats">
             <div class="stat-item">
@@ -1974,6 +1974,17 @@ async function homePage(env: Env): Promise<string> {
       </section>
       <section class="section split">
         <div>
+          <p class="eyebrow">Browser reading is here</p>
+          <h2>Read a message without installing the app.</h2>
+        </div>
+        <div class="copy-stack">
+          <p>Choose <strong>App or web</strong> when creating a message on iPhone. Your recipient can open the link on iPhone, Android, or desktop and enter the six-digit PIN in a supported browser.</p>
+          <p>The browser decrypts the message locally. The server still receives no plaintext or link secret, and the same one-time read and three-attempt PIN limit apply. Choose <strong>App only</strong> to keep reading restricted to the iPhone app.</p>
+          <p>For capture redaction and screenshot-triggered destruction, read in the iPhone app. Browsers do not provide those protections.</p>
+        </div>
+      </section>
+      <section class="section split">
+        <div>
           <p class="eyebrow">What it does</p>
           <h2>Messages are sealed before they leave the phone.</h2>
         </div>
@@ -1987,7 +1998,7 @@ async function homePage(env: Env): Promise<string> {
         <article>
           <span>01</span>
           <h3>Seal</h3>
-          <p>Write the note in the app, choose a six-digit PIN, and encrypt on device.</p>
+          <p>Write the note in the iPhone app, choose a six-digit PIN, and select App only or App or web. Encrypt on device.</p>
         </article>
         <article>
           <span>02</span>
@@ -1997,7 +2008,7 @@ async function homePage(env: Env): Promise<string> {
         <article>
           <span>03</span>
           <h3>Read once</h3>
-          <p>The reader reveals a narrow window, with capture redaction, screenshot-triggered destruction, and no selectable plaintext.</p>
+          <p>Open in the app or, if the sender selected App or web, in a supported browser. Enter the PIN, decrypt locally, and read once.</p>
         </article>
       </section>
       <section class="section apple-strip">
@@ -2351,7 +2362,7 @@ type MessagePageLinks = { appUrl: string; webUrl: string; clipPage: boolean; app
 
 function pageShell(title: string, env: Env, content: string, preserveFragment = false, bodyScript = "", messageLinks?: MessagePageLinks): string {
   const escapedTitle = escapeHtml(title);
-  const description = "cryptoscreen seals one-time encrypted messages for private reading on iPhone.";
+  const description = "Send one-time encrypted messages from iPhone. Read in the app or, when the sender allows it, in a web browser. Decrypt locally with a link and PIN.";
   const links = siteLinks(env);
   const xHandle = xHandleFromUrl(links.xUrl);
   const appleAppId = appleAppStoreId(env);
