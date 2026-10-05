@@ -19,7 +19,6 @@
 		0A001001000000000000000A /* ProImageEntitlementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000016 /* ProImageEntitlementStore.swift */; };
 		0A001001000000000000000B /* CryptoscreenReviewPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */; };
 		0A001001000000000000000C /* ReaderInteractionPrototypeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000019 /* ReaderInteractionPrototypeView.swift */; };
-		0A001001000000000000000D /* ParagraphRevealReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001A /* ParagraphRevealReaderView.swift */; };
 		0A0010020000000000000001 /* PrivacyScreenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000001 /* PrivacyScreenApp.swift */; };
 		0A0010020000000000000002 /* PrivacyReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000002 /* PrivacyReaderView.swift */; };
 		0A0010020000000000000003 /* ProximitySensor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000003 /* ProximitySensor.swift */; };
@@ -33,15 +32,20 @@
 		0A001002000000000000000B /* PrivacyScreenClip.app in Embed App Clips */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000013 /* PrivacyScreenClip.app */; };
 		0A001002000000000000000C /* ProImageEntitlementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000016 /* ProImageEntitlementStore.swift */; };
 		0A001002000000000000000D /* CryptoscreenReviewPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */; };
-		0A001002000000000000000E /* ParagraphRevealReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001A /* ParagraphRevealReaderView.swift */; };
 		0B0010010000000000000001 /* MessagesViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000001 /* MessagesViewController.swift */; };
 		0B0010010000000000000002 /* MessagesComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000002 /* MessagesComposeView.swift */; };
-		0B0010010000000000000003 /* MessagesSenderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000003 /* MessagesSenderService.swift */; };
 		0B0010010000000000000004 /* SealedMessageCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000007 /* SealedMessageCrypto.swift */; };
 		0B0010010000000000000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000005 /* Assets.xcassets */; };
 		0B0010010000000000000006 /* PrivacyScreenMessagesExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 0B0020010000000000000006 /* PrivacyScreenMessagesExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0B0010010000000000000007 /* ProImageEntitlementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000016 /* ProImageEntitlementStore.swift */; };
 		0B0010010000000000000008 /* CryptoscreenReviewPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */; };
+		0A001001000000000000000E /* CryptoscreenTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001B /* CryptoscreenTheme.swift */; };
+		0A001002000000000000000F /* CryptoscreenTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001B /* CryptoscreenTheme.swift */; };
+		0B0010010000000000000009 /* CryptoscreenTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001B /* CryptoscreenTheme.swift */; };
+		0A001001000000000000000F /* ImageAttachmentPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001C /* ImageAttachmentPreparer.swift */; };
+		0A0010020000000000000010 /* ImageAttachmentPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001C /* ImageAttachmentPreparer.swift */; };
+		0B001001000000000000000A /* ImageAttachmentPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001C /* ImageAttachmentPreparer.swift */; };
+		0B001001000000000000000B /* SealedMessageAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000010 /* SealedMessageAPI.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -81,13 +85,13 @@
 		0A0020010000000000000017 /* Products.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = Products.storekit; sourceTree = "<group>"; };
 		0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoscreenReviewPrompt.swift; sourceTree = "<group>"; };
 		0A0020010000000000000019 /* ReaderInteractionPrototypeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderInteractionPrototypeView.swift; sourceTree = "<group>"; };
-		0A002001000000000000001A /* ParagraphRevealReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParagraphRevealReaderView.swift; sourceTree = "<group>"; };
 		0B0020010000000000000001 /* MessagesViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesViewController.swift; sourceTree = "<group>"; };
 		0B0020010000000000000002 /* MessagesComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesComposeView.swift; sourceTree = "<group>"; };
-		0B0020010000000000000003 /* MessagesSenderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesSenderService.swift; sourceTree = "<group>"; };
 		0B0020010000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0B0020010000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0B0020010000000000000006 /* PrivacyScreenMessagesExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PrivacyScreenMessagesExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		0A002001000000000000001B /* CryptoscreenTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoscreenTheme.swift; sourceTree = "<group>"; };
+		0A002001000000000000001C /* ImageAttachmentPreparer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAttachmentPreparer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -140,8 +144,9 @@
 				0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */,
 				0A0020010000000000000008 /* CaptureShield.swift */,
 				0A0020010000000000000009 /* SealedMessageRootView.swift */,
+				0A002001000000000000001B /* CryptoscreenTheme.swift */,
+				0A002001000000000000001C /* ImageAttachmentPreparer.swift */,
 				0A0020010000000000000019 /* ReaderInteractionPrototypeView.swift */,
-				0A002001000000000000001A /* ParagraphRevealReaderView.swift */,
 				0A0020010000000000000005 /* Assets.xcassets */,
 				0A0020010000000000000011 /* PrivacyScreen.entitlements */,
 			);
@@ -172,7 +177,6 @@
 			children = (
 				0B0020010000000000000001 /* MessagesViewController.swift */,
 				0B0020010000000000000002 /* MessagesComposeView.swift */,
-				0B0020010000000000000003 /* MessagesSenderService.swift */,
 				0B0020010000000000000004 /* Info.plist */,
 				0B0020010000000000000005 /* Assets.xcassets */,
 			);
@@ -343,7 +347,8 @@
 				0A0010010000000000000007 /* CaptureShield.swift in Sources */,
 				0A0010010000000000000008 /* SealedMessageRootView.swift in Sources */,
 				0A001001000000000000000C /* ReaderInteractionPrototypeView.swift in Sources */,
-				0A001001000000000000000D /* ParagraphRevealReaderView.swift in Sources */,
+				0A001001000000000000000E /* CryptoscreenTheme.swift in Sources */,
+				0A001001000000000000000F /* ImageAttachmentPreparer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -362,7 +367,8 @@
 				0A0010020000000000000009 /* PrivacyScreenClipApp.swift in Sources */,
 				0A001002000000000000000C /* ProImageEntitlementStore.swift in Sources */,
 				0A001002000000000000000D /* CryptoscreenReviewPrompt.swift in Sources */,
-				0A001002000000000000000E /* ParagraphRevealReaderView.swift in Sources */,
+				0A001002000000000000000F /* CryptoscreenTheme.swift in Sources */,
+				0A0010020000000000000010 /* ImageAttachmentPreparer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -372,10 +378,12 @@
 			files = (
 				0B0010010000000000000001 /* MessagesViewController.swift in Sources */,
 				0B0010010000000000000002 /* MessagesComposeView.swift in Sources */,
-				0B0010010000000000000003 /* MessagesSenderService.swift in Sources */,
 				0B0010010000000000000004 /* SealedMessageCrypto.swift in Sources */,
 				0B0010010000000000000007 /* ProImageEntitlementStore.swift in Sources */,
 				0B0010010000000000000008 /* CryptoscreenReviewPrompt.swift in Sources */,
+				0B0010010000000000000009 /* CryptoscreenTheme.swift in Sources */,
+				0B001001000000000000000A /* ImageAttachmentPreparer.swift in Sources */,
+				0B001001000000000000000B /* SealedMessageAPI.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -517,7 +525,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreen/PrivacyScreen.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -547,7 +555,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreen/PrivacyScreen.entitlements;
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -564,7 +572,6 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_ACTIVE_COMPILATION_CONDITIONS = READER_LAB;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -578,7 +585,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreenClip/PrivacyScreenClip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = PrivacyScreenClip/Info.plist;
@@ -608,7 +615,7 @@
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_ENTITLEMENTS = PrivacyScreenClip/PrivacyScreenClip.entitlements;
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = PrivacyScreenClip/Info.plist;
@@ -637,7 +644,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -668,7 +675,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = "iMessage App Icon";
 				CODE_SIGN_IDENTITY = "iPhone Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 30;
+				CURRENT_PROJECT_VERSION = 31;
 				DEVELOPMENT_TEAM = J7C56736F3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;

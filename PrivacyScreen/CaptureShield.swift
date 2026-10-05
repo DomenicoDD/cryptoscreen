@@ -82,8 +82,9 @@ struct CaptureShield<Content: View>: View {
   var body: some View {
     ZStack {
       content
+        // Opacity alone hides the content; the previous full-screen blur added an
+        // offscreen render pass to every frame of the app for no visual effect.
         .opacity(shouldRedact ? 0 : 1)
-        .blur(radius: shouldRedact ? 20 : 0)
 
       if shouldRedact {
         ZStack {

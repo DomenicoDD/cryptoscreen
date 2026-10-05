@@ -46,6 +46,25 @@ private struct FlashlightLineRevealSpec: Equatable {
   }
 }
 
+/// Memoizes line layout and the latest scroll frames. Held in @State as a
+/// reference so writes never trigger a re-render; the body used to re-wrap
+/// the whole message (thousands of text measurements) on every scroll frame.
+private final class ReaderLayoutCache {
+  private var key: (message: String, width: CGFloat, fontSize: CGFloat)?
+  private var lines: [ReaderLine] = []
+  var latestLineFrames: [LineFrame] = []
+
+  func lines(for message: String, width: CGFloat, fontSize: CGFloat) -> [ReaderLine] {
+    if let key, key.message == message, key.width == width, key.fontSize == fontSize {
+      return lines
+    }
+
+    lines = TextLineWrapper.wrap(message, width: width, fontSize: fontSize)
+    key = (message, width, fontSize)
+    return lines
+  }
+}
+
 struct PrivacyReaderView: View {
   let message: String
   let showsFontControls: Bool
@@ -72,7 +91,7 @@ struct PrivacyReaderView: View {
   @State private var interactionMode: PrivacyReaderInteractionMode = .handOnScreen
   @State private var flashlightLocation: CGPoint = .zero
   @State private var didInitializeFlashlightLocation = false
-  @State private var latestLineFrames: [LineFrame] = []
+  @State private var layoutCache = ReaderLayoutCache()
   @State private var flashlightRevealSpecs: [Int: FlashlightLineRevealSpec] = [:]
 
   init(
@@ -118,13 +137,19 @@ struct PrivacyReaderView: View {
       let revealHeight = proxy.size.height * 0.22
       let revealZone = CGRect(x: 0, y: revealTop, width: proxy.size.width, height: revealHeight)
       let textWidth = proxy.size.width - 40
-      let lines = TextLineWrapper.wrap(message, width: textWidth, fontSize: fontSize)
+      let lines = layoutCache.lines(for: message, width: textWidth, fontSize: fontSize)
       let bottomReadingPadding = max(proxy.safeAreaInsets.bottom + 180, proxy.size.height - revealZone.midY + 96)
 
       ZStack(alignment: .top) {
         ZStack(alignment: .top) {
-          Color(red: 0.045, green: 0.047, blue: 0.043)
+          CSTheme.background
             .ignoresSafeArea()
+
+          if revealActive {
+            RevealLensBand(zone: revealZone)
+              .transition(.opacity)
+              .allowsHitTesting(false)
+          }
 
           ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(alignment: .leading, spacing: fontSize * 0.32) {
@@ -133,6 +158,7 @@ struct PrivacyReaderView: View {
                   if interactionMode == .flashlight {
                     FlashlightLineText(
                       text: line.text,
+                      hiddenText: line.hiddenText,
                       lineID: line.id,
                       fontSize: fontSize,
                       revealSpec: flashlightRevealSpecs[line.id]
@@ -140,6 +166,7 @@ struct PrivacyReaderView: View {
                   } else {
                     ScrambleLineText(
                       text: line.text,
+                      hiddenText: line.hiddenText,
                       attributedText: line.attributedText,
                       lineID: line.id,
                       fontSize: fontSize,
@@ -168,7 +195,7 @@ struct PrivacyReaderView: View {
             .padding(.bottom, bottomReadingPadding)
           }
           .onPreferenceChange(LineFramePreferenceKey.self) { frames in
-            latestLineFrames = frames
+            layoutCache.latestLineFrames = frames
 
             switch interactionMode {
             case .handOnScreen:
@@ -240,8 +267,9 @@ struct PrivacyReaderView: View {
         }
       }
       .coordinateSpace(name: "readerScreen")
+      .animation(.easeOut(duration: 0.18), value: revealActive)
       .textSelection(.disabled)
-      .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
+      .tint(CSTheme.accent)
       .environment(\.openURL, OpenURLAction { url in
         pendingExternalLink = PendingExternalLink(url: url)
         return .handled
@@ -315,13 +343,13 @@ struct PrivacyReaderView: View {
           activeLineID = nil
           pendingLineID = nil
           initializeFlashlightLocationIfNeeded(in: size)
-          updateFlashlightReveal(frames: latestLineFrames, lines: lines, size: size)
+          updateFlashlightReveal(frames: layoutCache.latestLineFrames, lines: lines, size: size)
         }
 
         Haptics.buttonTap()
       }
       .onChange(of: flashlightLocation) { _, _ in
-        updateFlashlightReveal(frames: latestLineFrames, lines: lines, size: size)
+        updateFlashlightReveal(frames: layoutCache.latestLineFrames, lines: lines, size: size)
       }
     }
   }
@@ -417,11 +445,11 @@ struct PrivacyReaderView: View {
     }
 
     let location = normalizedFlashlightLocation(in: size)
-    let linesByID = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0) })
     var nextSpecs: [Int: FlashlightLineRevealSpec] = [:]
 
     for frame in frames {
-      guard let line = linesByID[frame.id],
+      guard lines.indices.contains(frame.id),
+            case let line = lines[frame.id],
             let spec = flashlightRevealSpec(for: line, frame: frame.frame, location: location) else {
         continue
       }
@@ -577,14 +605,14 @@ private struct HandPlacementOKButton: View {
     Button(action: action) {
       GeometryReader { proxy in
         ZStack(alignment: .leading) {
-          RoundedRectangle(cornerRadius: 8)
+          CSTheme.card(CSTheme.smallCornerRadius + 2)
             .fill(Color.black.opacity(0.22))
             .overlay(
-              RoundedRectangle(cornerRadius: 8)
+              CSTheme.card(CSTheme.smallCornerRadius + 2)
                 .stroke(Color(red: 0.38, green: 0.78, blue: 0.55), lineWidth: 1.3)
             )
 
-          RoundedRectangle(cornerRadius: 8)
+          CSTheme.card(CSTheme.smallCornerRadius + 2)
             .fill(Color(red: 0.38, green: 0.78, blue: 0.55))
             .frame(width: proxy.size.width * progress)
             .animation(.linear(duration: 5.0), value: progress)
@@ -602,7 +630,7 @@ private struct HandPlacementOKButton: View {
             .clipped()
             .animation(.linear(duration: 5.0), value: progress)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(CSTheme.card(CSTheme.smallCornerRadius + 2))
       }
     }
     .buttonStyle(.plain)
@@ -740,6 +768,7 @@ final class RevealTouchCaptureUIView: UIView {
 
 private struct FlashlightLineText: View {
   let text: String
+  let hiddenText: String
   let lineID: Int
   let fontSize: CGFloat
   let revealSpec: FlashlightLineRevealSpec?
@@ -748,18 +777,14 @@ private struct FlashlightLineText: View {
   @State private var displayedText = ""
   @State private var animationTask: Task<Void, Never>?
 
-  private var hiddenText: String {
-    CipherText.hiddenText(for: text, seed: lineID)
-  }
-
   var body: some View {
     Text(displayedText.isEmpty ? hiddenText : displayedText)
       .font(.system(size: fontSize, weight: revealSpec == nil ? .regular : .semibold, design: .monospaced))
-      .foregroundStyle(revealSpec == nil ? Color.white.opacity(0.34) : Color(red: 0.965, green: 0.965, blue: 0.92))
+      .foregroundStyle(revealSpec == nil ? Color.white.opacity(0.34) : CSTheme.ink)
       .lineLimit(1)
       .minimumScaleFactor(0.86)
       .frame(maxWidth: .infinity, minHeight: fontSize * 1.35, alignment: .leading)
-      .shadow(color: revealSpec == nil ? .clear : Color(red: 0.3, green: 1.0, blue: 0.66).opacity(0.24), radius: 8, y: 1)
+      .shadow(color: CSTheme.accent.opacity(revealSpec == nil ? 0 : 0.24), radius: revealSpec == nil ? 0 : 8, y: 1)
       .accessibilityLabel(revealSpec == nil ? "Encrypted message line" : "Partially revealed message line")
       .privacySensitive()
       .onAppear {
@@ -863,7 +888,7 @@ private struct ReaderFlashlightBeamOverlay: View {
       let beamHeight = fontSize * 3.35
       let apex = CGPoint(x: location.x, y: location.y - 8)
       let beamTop = max(location.y - beamHeight, 0)
-      let accent = Color(red: 0.48, green: 1.0, blue: 0.70)
+      let accent = CSTheme.accent
 
       for step in 0..<5 {
         let inset = CGFloat(step)
@@ -905,15 +930,15 @@ private struct ReaderFlashlightHandle: View {
   var body: some View {
     ZStack {
       Circle()
-        .fill(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.14))
+        .fill(CSTheme.accent.opacity(0.14))
         .frame(width: 72, height: 72)
         .blur(radius: 8)
 
       Circle()
-        .fill(Color(red: 0.48, green: 1.0, blue: 0.70))
+        .fill(CSTheme.accent)
         .frame(width: 54, height: 54)
         .overlay(Circle().stroke(Color.white.opacity(0.36), lineWidth: 1.2))
-        .shadow(color: Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.24), radius: 14, y: 4)
+        .shadow(color: CSTheme.accent.opacity(0.24), radius: 14, y: 4)
 
       Image(systemName: "lightbulb.fill")
         .font(.system(size: 21, weight: .bold))
@@ -929,18 +954,16 @@ private struct ReaderFlashlightHandle: View {
 
 private struct ScrambleLineText: View {
   let text: String
+  let hiddenText: String
   let attributedText: AttributedString
   let lineID: Int
   let fontSize: CGFloat
   let isRevealed: Bool
   let isActive: Bool
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var displayedText = ""
   @State private var animationTask: Task<Void, Never>?
-
-  private var hiddenText: String {
-    CipherText.hiddenText(for: text, seed: lineID)
-  }
 
   private var visibleText: String {
     guard isRevealed else {
@@ -957,11 +980,11 @@ private struct ScrambleLineText: View {
   var body: some View {
     lineText
       .font(.system(size: fontSize, weight: isActive ? .semibold : .regular, design: .monospaced))
-      .foregroundStyle(isRevealed ? Color(red: 0.965, green: 0.965, blue: 0.92) : Color.white.opacity(0.34))
+      .foregroundStyle(isRevealed ? CSTheme.ink : Color.white.opacity(0.34))
       .lineLimit(1)
       .minimumScaleFactor(0.86)
       .frame(maxWidth: .infinity, minHeight: fontSize * 1.35, alignment: .leading)
-      .shadow(color: isActive ? Color(red: 0.3, green: 1.0, blue: 0.66).opacity(0.28) : .clear, radius: 8, y: 1)
+      .shadow(color: CSTheme.accent.opacity(isActive ? 0.30 : 0), radius: isActive ? 8 : 0, y: 1)
       .accessibilityLabel(isRevealed ? "Revealed message line" : "Encrypted message line")
       .privacySensitive()
       .onAppear {
@@ -994,6 +1017,11 @@ private struct ScrambleLineText: View {
       withAnimation(.easeOut(duration: 0.12)) {
         displayedText = hiddenText
       }
+      return
+    }
+
+    guard !reduceMotion else {
+      displayedText = text
       return
     }
 
@@ -1044,7 +1072,7 @@ private struct ReaderChrome: View {
             Image(systemName: "xmark")
               .font(.system(size: 15, weight: .bold))
               .frame(width: 50, height: 50)
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
               .background(.ultraThinMaterial, in: Circle())
               .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
           }
@@ -1068,7 +1096,7 @@ private struct ReaderChrome: View {
 
             Text("\(Int(fontSize))")
               .font(.system(size: 13, weight: .semibold, design: .monospaced))
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
               .frame(width: 34)
 
             Button {
@@ -1082,7 +1110,7 @@ private struct ReaderChrome: View {
             .disabled(fontSize >= 30)
             .accessibilityLabel("Increase font size")
           }
-          .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+          .foregroundStyle(CSTheme.ink)
           .padding(6)
           .background(.ultraThinMaterial, in: Capsule())
           .overlay(Capsule().stroke(Color.white.opacity(0.13), lineWidth: 1))
@@ -1110,7 +1138,7 @@ private struct ReaderModeSettingsMenu: View {
       Image(systemName: "gearshape.fill")
         .font(.system(size: 16, weight: .semibold))
         .frame(width: 44, height: 44)
-        .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+        .foregroundStyle(CSTheme.ink)
         .background(.ultraThinMaterial, in: Circle())
         .overlay(Circle().stroke(Color.white.opacity(0.13), lineWidth: 1))
     }
@@ -1124,32 +1152,89 @@ struct RevealTouchTestButton: View {
   let showsHint: Bool
   let frame: CGRect
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @State private var breathes = false
+
+  private var shape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: frame.height / 2, style: .continuous)
+  }
+
   var body: some View {
-    ZStack {
-      HStack(spacing: 0) {
-        if showsHint {
-          Text("Cover this part with your hand")
-            .font(.system(size: 15, weight: .semibold, design: .rounded))
-            .lineLimit(1)
-            .minimumScaleFactor(0.78)
-        }
+    HStack(spacing: 10) {
+      if showsHint {
+        Image(systemName: "hand.raised.fill")
+          .font(.system(size: 16, weight: .semibold))
+          .symbolRenderingMode(.hierarchical)
+
+        Text("Cover here to read")
+          .font(CSTheme.rounded(15, .semibold))
+          .lineLimit(1)
+          .minimumScaleFactor(0.78)
       }
     }
+    .foregroundStyle(CSTheme.accent.opacity(0.9))
     .frame(width: frame.width, height: frame.height)
-    .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.82))
+    .background(CSTheme.accent.opacity(breathes ? 0.10 : 0.05), in: shape)
     .overlay(
-      RoundedRectangle(cornerRadius: 8)
-        .stroke(
-          Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.56),
-          style: StrokeStyle(lineWidth: 1.3, dash: [5, 5])
-        )
+      shape.strokeBorder(
+        CSTheme.accent.opacity(breathes ? 0.62 : 0.38),
+        style: StrokeStyle(lineWidth: 1.2, dash: [5, 5])
+      )
     )
-    .contentShape(RoundedRectangle(cornerRadius: 8))
+    .shadow(color: CSTheme.accent.opacity(breathes ? 0.22 : 0), radius: 18)
+    .contentShape(shape)
+    .scaleEffect(isRevealActive ? 0.94 : 1)
     .opacity(isRevealActive ? 0 : (showsHint ? 1 : 0.01))
     .position(x: frame.midX, y: frame.midY)
     .animation(.easeInOut(duration: 0.20), value: isRevealActive)
     .animation(.easeOut(duration: 0.22), value: showsHint)
-    .accessibilityLabel("Reveal test area")
+    .onAppear {
+      guard !reduceMotion else {
+        return
+      }
+
+      withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+        breathes = true
+      }
+    }
+    .accessibilityLabel("Cover this area with your hand to read")
+  }
+}
+
+/// Soft band marking where lines become readable while the hand covers the sensor zone.
+struct RevealLensBand: View {
+  let zone: CGRect
+
+  var body: some View {
+    ZStack {
+      LinearGradient(
+        stops: [
+          .init(color: CSTheme.accent.opacity(0), location: 0),
+          .init(color: CSTheme.accent.opacity(0.07), location: 0.5),
+          .init(color: CSTheme.accent.opacity(0), location: 1)
+        ],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+
+      VStack {
+        lensEdge
+        Spacer()
+        lensEdge
+      }
+    }
+    .frame(width: zone.width, height: zone.height)
+    .position(x: zone.midX, y: zone.midY)
+    .accessibilityHidden(true)
+  }
+
+  private var lensEdge: some View {
+    LinearGradient(
+      colors: [CSTheme.accent.opacity(0), CSTheme.accent.opacity(0.35), CSTheme.accent.opacity(0)],
+      startPoint: .leading,
+      endPoint: .trailing
+    )
+    .frame(height: 1)
   }
 }
 
@@ -1161,13 +1246,13 @@ private struct ScrollTeachingPill: View {
       ZStack {
         Capsule()
           .stroke(
-            Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.62),
+            CSTheme.accent.opacity(0.62),
             style: StrokeStyle(lineWidth: 1.25, dash: [5, 5])
           )
           .frame(width: 38, height: 70)
 
         Circle()
-          .fill(Color(red: 0.48, green: 1.0, blue: 0.70))
+          .fill(CSTheme.accent)
           .frame(width: 12, height: 12)
           .offset(y: movesUp ? -22 : 22)
       }
@@ -1175,7 +1260,7 @@ private struct ScrollTeachingPill: View {
 
       Text("Scroll")
         .font(.system(size: 11, weight: .semibold, design: .rounded))
-        .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.82))
+        .foregroundStyle(CSTheme.accent.opacity(0.82))
     }
     .padding(.horizontal, 18)
     .padding(.vertical, 12)
@@ -1214,15 +1299,11 @@ private func distance(from first: CGPoint, to second: CGPoint) -> CGFloat {
 private enum Haptics {
   @MainActor
   static func lineTranslated() {
-    let generator = UIImpactFeedbackGenerator(style: .light)
-    generator.prepare()
-    generator.impactOccurred(intensity: 0.34)
+    CSHaptics.tick(0.34)
   }
 
   @MainActor
   static func buttonTap() {
-    let generator = UIImpactFeedbackGenerator(style: .soft)
-    generator.prepare()
-    generator.impactOccurred(intensity: 0.28)
+    CSHaptics.tap(0.28)
   }
 }

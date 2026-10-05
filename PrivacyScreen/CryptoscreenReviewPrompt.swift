@@ -25,13 +25,13 @@ enum ReviewPromptTracker {
   }
 }
 
+/// Anonymous feedback sheet. App Store reviews are requested separately with the
+/// system prompt, asked of every user alike rather than only those who say they're happy.
 struct CryptoscreenReviewPrompt: View {
-  @Environment(\.requestReview) private var requestReview
-
   let sendFeedback: (String) async throws -> Void
   let onDone: () -> Void
 
-  @State private var step: ReviewPromptStep = .question
+  private let step: ReviewPromptStep = .feedback
   @State private var feedback = ""
   @State private var statusText: String?
   @State private var didFailSending = false
@@ -42,13 +42,11 @@ struct CryptoscreenReviewPrompt: View {
   }
 
   init(
-    startsWithFeedback: Bool = false,
     sendFeedback: @escaping (String) async throws -> Void,
     onDone: @escaping () -> Void
   ) {
     self.sendFeedback = sendFeedback
     self.onDone = onDone
-    _step = State(initialValue: startsWithFeedback ? .feedback : .question)
   }
 
   var body: some View {
@@ -69,14 +67,7 @@ struct CryptoscreenReviewPrompt: View {
             .fixedSize(horizontal: false, vertical: true)
         }
 
-        switch step {
-        case .question:
-          questionActions
-        case .review:
-          reviewActions
-        case .feedback:
-          feedbackForm
-        }
+        feedbackForm
       }
       .padding(24)
     }
@@ -84,57 +75,6 @@ struct CryptoscreenReviewPrompt: View {
       if newValue.count > reviewPromptFeedbackCharacterLimit {
         feedback = String(newValue.prefix(reviewPromptFeedbackCharacterLimit))
       }
-    }
-  }
-
-  private var questionActions: some View {
-    HStack(spacing: 10) {
-      Button {
-        withAnimation(.easeInOut(duration: 0.2)) {
-          step = .feedback
-          statusText = nil
-          didFailSending = false
-        }
-        softHaptic()
-      } label: {
-        Text("Not yet")
-          .frame(maxWidth: .infinity)
-      }
-      .buttonStyle(ReviewPromptSecondaryButtonStyle())
-
-      Button {
-        withAnimation(.easeInOut(duration: 0.2)) {
-          step = .review
-        }
-        softHaptic()
-      } label: {
-        Text("Yes")
-          .frame(maxWidth: .infinity)
-      }
-      .buttonStyle(ReviewPromptPrimaryButtonStyle())
-    }
-  }
-
-  private var reviewActions: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Button {
-        requestReview()
-        softHaptic()
-        onDone()
-      } label: {
-        Label("Review cryptoscreen", systemImage: "star.fill")
-          .frame(maxWidth: .infinity)
-      }
-      .buttonStyle(ReviewPromptPrimaryButtonStyle())
-
-      Button {
-        onDone()
-        softHaptic()
-      } label: {
-        Text("Maybe later")
-          .frame(maxWidth: .infinity)
-      }
-      .buttonStyle(ReviewPromptSecondaryButtonStyle())
     }
   }
 
@@ -267,29 +207,13 @@ private func warningHaptic() {
 }
 
 private enum ReviewPromptStep {
-  case question
-  case review
   case feedback
 
   var title: String {
-    switch self {
-    case .question:
-      return "Are you liking cryptoscreen?"
-    case .review:
-      return "Review cryptoscreen"
-    case .feedback:
-      return "How can we improve it?"
-    }
+    "How can we improve it?"
   }
 
   var subtitle: String {
-    switch self {
-    case .question:
-      return "A quick answer helps us understand how the app is doing."
-    case .review:
-      return "An App Store review would mean a lot for us."
-    case .feedback:
-      return "Sent anonymously from the app. No account, sealed link, PIN, or message content is attached."
-    }
+    "Sent anonymously from the app. No account, sealed link, PIN, or message content is attached."
   }
 }

@@ -5,7 +5,6 @@ import UIKit
 struct MessagesComposeView: View {
   @ObservedObject var context: MessagesComposeContext
 
-  @AppStorage("cryptoscreen.messages.sharePINSeparately") private var sharePINSeparately = false
   @AppStorage("cryptoscreen.messages.readPolicy") private var readPolicyRawValue = SealedMessageReadPolicy.appOnly.rawValue
   @StateObject private var proImageEntitlements = ProImageEntitlementStore()
   @State private var message = ""
@@ -18,10 +17,11 @@ struct MessagesComposeView: View {
   @State private var createdMessage: CreatedSealedMessage?
   @State private var statusText: String?
   @State private var isShowingImagePaywall = false
-  @State private var isShowingReviewPrompt = false
+  @State private var insertedMessage: CreatedSealedMessage?
+  @State private var didCopyPIN = false
   @FocusState private var focusedField: Field?
 
-  private let sender = MessagesSenderService.production
+  private let sender = SealedMessageAPI.production
 
   private var normalizedPIN: String {
     SealedMessageCrypto.normalizePIN(pin)
@@ -54,6 +54,22 @@ struct MessagesComposeView: View {
         if let selectedMessageLink = context.selectedMessageLink {
           MessagesOpenSelectedView(context: context, link: selectedMessageLink)
             .id(selectedMessageLink.absoluteString)
+        } else if let insertedMessage {
+          PINHandoffView(
+            pin: insertedMessage.pin,
+            didCopy: didCopyPIN,
+            onCopy: {
+              // Local-only and short-lived so the PIN doesn't sync via Universal Clipboard or linger.
+              UIPasteboard.general.setItems(
+                [[UIPasteboard.typeAutomatic: insertedMessage.pin]],
+                options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(120)]
+              )
+              didCopyPIN = true
+            },
+            onDone: {
+              context.dismiss()
+            }
+          )
         } else {
           ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -61,7 +77,6 @@ struct MessagesComposeView: View {
               imageSection
               readPolicySection
               pinSection
-              sharePINSection
               actionSection
             }
             .padding(16)
@@ -69,7 +84,7 @@ struct MessagesComposeView: View {
           .scrollDismissesKeyboard(.interactively)
         }
       }
-      .background(Color.black)
+      .background(CSBackground())
       .navigationTitle("cryptoscreen")
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
@@ -77,7 +92,7 @@ struct MessagesComposeView: View {
             Button("Create") {
               context.createNewMessage()
             }
-            .foregroundStyle(.green)
+            .foregroundStyle(CSTheme.accent)
           } else {
             EmptyView()
           }
@@ -92,19 +107,6 @@ struct MessagesComposeView: View {
         ProImageAttachmentPaywallView(entitlementStore: proImageEntitlements)
           .presentationDetents([.large])
           .presentationDragIndicator(.visible)
-      }
-      .sheet(isPresented: $isShowingReviewPrompt) {
-        CryptoscreenReviewPrompt(
-          sendFeedback: { feedback in
-            try await sender.submitFeedback(message: feedback)
-          },
-          onDone: {
-            isShowingReviewPrompt = false
-            context.dismiss()
-          }
-        )
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
       }
     }
   }
@@ -125,7 +127,7 @@ struct MessagesComposeView: View {
             createdMessage = nil
           }
           .font(.caption.weight(.semibold))
-          .foregroundStyle(.green)
+          .foregroundStyle(CSTheme.accent)
         }
       }
 
@@ -136,9 +138,9 @@ struct MessagesComposeView: View {
         .scrollContentBackground(.hidden)
         .background(Color.white.opacity(0.08))
         .foregroundStyle(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(CSTheme.card())
         .overlay(
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
+          CSTheme.card()
             .stroke(Color.white.opacity(0.12), lineWidth: 1)
         )
         .onChange(of: message) { _, _ in
@@ -148,7 +150,7 @@ struct MessagesComposeView: View {
       HStack(spacing: 8) {
         if !isMessageWithinSizeLimit {
           Text("Message is too long")
-            .foregroundStyle(.orange)
+            .foregroundStyle(CSTheme.warning)
             .lineLimit(1)
         }
 
@@ -192,14 +194,14 @@ struct MessagesComposeView: View {
               createdMessage = nil
             }
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.green)
+            .foregroundStyle(CSTheme.accent)
           }
 
           Spacer()
         }
         .padding(10)
         .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(CSTheme.card())
       } else {
         if proImageEntitlements.isImageAttachmentUnlocked {
           PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
@@ -209,7 +211,7 @@ struct MessagesComposeView: View {
               .frame(maxWidth: .infinity)
               .padding(.vertical, 12)
               .background(Color.white.opacity(0.08))
-              .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+              .clipShape(CSTheme.card())
           }
         } else {
           Button {
@@ -222,7 +224,7 @@ struct MessagesComposeView: View {
               .frame(maxWidth: .infinity)
               .padding(.vertical, 12)
               .background(Color.white.opacity(0.08))
-              .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+              .clipShape(CSTheme.card())
           }
           .buttonStyle(.plain)
 
@@ -247,10 +249,10 @@ struct MessagesComposeView: View {
         .padding(.horizontal, 14)
         .frame(height: 56)
         .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(CSTheme.card())
         .overlay(
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(normalizedPIN.count == SealedMessageCrypto.pinLength ? Color.green.opacity(0.65) : Color.white.opacity(0.12), lineWidth: 1)
+          CSTheme.card()
+            .stroke(normalizedPIN.count == SealedMessageCrypto.pinLength ? CSTheme.accent.opacity(0.65) : Color.white.opacity(0.12), lineWidth: 1)
         )
         .onChange(of: pin) { _, newValue in
           let normalized = SealedMessageCrypto.normalizePIN(newValue)
@@ -286,25 +288,7 @@ struct MessagesComposeView: View {
     }
     .padding(12)
     .background(Color.white.opacity(0.08))
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-  }
-
-  private var sharePINSection: some View {
-    Toggle(isOn: $sharePINSeparately) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text("Share PIN in separate message")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.white)
-        Text("Default is off. Turn on to insert the PIN after the sealed link.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-    }
-    .toggleStyle(.switch)
-    .tint(.green)
-    .padding(12)
-    .background(Color.white.opacity(0.08))
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .clipShape(CSTheme.card())
   }
 
   @ViewBuilder
@@ -327,19 +311,6 @@ struct MessagesComposeView: View {
         }
         .buttonStyle(MessagesPrimaryButtonStyle())
         .disabled(isInserting || !context.canInsertMessages)
-
-        if !sharePINSeparately {
-          Button {
-            Task {
-              await insertPIN(createdMessage.pin)
-            }
-          } label: {
-            Label("Insert PIN separately", systemImage: "number")
-              .frame(maxWidth: .infinity)
-          }
-          .buttonStyle(MessagesSecondaryButtonStyle())
-          .disabled(isInserting || !context.canInsertMessages)
-        }
       } else {
         Button {
           Task {
@@ -375,7 +346,7 @@ struct MessagesComposeView: View {
         throw MessagesComposeViewError.invalidImage
       }
 
-      let prepared = try prepareImageForUpload(data)
+      let prepared = try await ImageAttachmentPreparer.prepare(data, maxPixelDimension: 1800)
       await MainActor.run {
         selectedImageData = prepared.data
         selectedImagePreview = prepared.preview
@@ -419,19 +390,10 @@ struct MessagesComposeView: View {
       let createdMessage = try await sender.create(upload: upload, imageAttachment: imageAttachment, readPolicy: readPolicy)
 
       do {
-        try await context.insertSealedMessage(
-          createdMessage,
-          includePINMessage: sharePINSeparately,
-          dismissAfterInsert: false
-        )
-        let shouldShowReviewPrompt = ReviewPromptTracker.recordSuccessfulSend()
+        try await context.insertSealedMessage(createdMessage)
         await MainActor.run {
-          statusText = sharePINSeparately ? "Sealed message and PIN inserted." : "Sealed message inserted."
-          isShowingReviewPrompt = shouldShowReviewPrompt
           isSealing = false
-          if !shouldShowReviewPrompt {
-            context.dismiss()
-          }
+          showPINHandoff(for: createdMessage)
         }
       } catch {
         await MainActor.run {
@@ -453,19 +415,10 @@ struct MessagesComposeView: View {
     statusText = nil
 
     do {
-      try await context.insertSealedMessage(
-        createdMessage,
-        includePINMessage: sharePINSeparately,
-        dismissAfterInsert: false
-      )
-      let shouldShowReviewPrompt = ReviewPromptTracker.recordSuccessfulSend()
+      try await context.insertSealedMessage(createdMessage)
       await MainActor.run {
-        statusText = sharePINSeparately ? "Sealed message and PIN inserted." : "Sealed message inserted."
-        isShowingReviewPrompt = shouldShowReviewPrompt
         isInserting = false
-        if !shouldShowReviewPrompt {
-          context.dismiss()
-        }
+        showPINHandoff(for: createdMessage)
       }
     } catch {
       await MainActor.run {
@@ -475,51 +428,16 @@ struct MessagesComposeView: View {
     }
   }
 
-  private func insertPIN(_ pin: String) async {
-    isInserting = true
-    statusText = nil
-
-    do {
-      try await context.insertPIN(pin, dismissAfterInsert: true)
-      await MainActor.run {
-        statusText = "PIN inserted."
-        isInserting = false
-      }
-    } catch {
-      await MainActor.run {
-        statusText = "Could not insert the PIN into this conversation."
-        isInserting = false
-      }
+  private func showPINHandoff(for createdMessage: CreatedSealedMessage) {
+    self.createdMessage = nil
+    message = ""
+    pin = ""
+    didCopyPIN = false
+    withAnimation(.easeOut(duration: 0.2)) {
+      insertedMessage = createdMessage
     }
   }
 
-  private func prepareImageForUpload(_ data: Data) throws -> (data: Data, preview: UIImage) {
-    guard let image = UIImage(data: data) else {
-      throw MessagesComposeViewError.invalidImage
-    }
-
-    let maxDimension: CGFloat = 1800
-    let longestSide = max(image.size.width, image.size.height)
-    let uploadImage: UIImage
-    if longestSide > maxDimension {
-      let scale = maxDimension / longestSide
-      let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
-      let renderer = UIGraphicsImageRenderer(size: targetSize)
-      uploadImage = renderer.image { _ in
-        image.draw(in: CGRect(origin: .zero, size: targetSize))
-      }
-    } else {
-      uploadImage = image
-    }
-
-    guard let jpegData = uploadImage.jpegData(compressionQuality: 0.82),
-          !jpegData.isEmpty,
-          jpegData.count <= SealedMessageCrypto.maxImageAttachmentByteCount else {
-      throw MessagesComposeViewError.invalidImage
-    }
-
-    return (jpegData, uploadImage)
-  }
 
   private enum Field {
     case message
@@ -595,11 +513,59 @@ private struct MessagesOpenSelectedView: View {
 
       if didOpen {
         statusText = "Opened in cryptoscreen."
-        statusColor = .green
+        statusColor = CSTheme.accent
       } else {
         statusText = "Could not open cryptoscreen. You can still create your own message here."
-        statusColor = .orange
+        statusColor = CSTheme.warning
       }
+    }
+  }
+}
+
+/// Shown after the link is inserted. The PIN deliberately never goes into the
+/// same thread as the link: anyone who sees the conversation would hold both factors.
+private struct PINHandoffView: View {
+  let pin: String
+  let didCopy: Bool
+  let onCopy: () -> Void
+  let onDone: () -> Void
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 16) {
+        Label("Sealed link inserted", systemImage: "checkmark.seal.fill")
+          .font(.headline)
+          .foregroundStyle(CSTheme.accent)
+
+        Text("Now share the PIN another way: say it out loud, or send it in a different app. Keeping the link and PIN apart is what protects the message.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+
+        Text(pin)
+          .font(CSTheme.mono(30, .semibold))
+          .tracking(6)
+          .foregroundStyle(CSTheme.ink)
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 14)
+          .background(Color.white.opacity(0.08), in: CSTheme.card())
+          .privacySensitive()
+          .accessibilityLabel("PIN")
+          .accessibilityValue(pin.map(String.init).joined(separator: " "))
+
+        Button(action: onCopy) {
+          Label(didCopy ? "Copied for 2 minutes" : "Copy PIN", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(MessagesSecondaryButtonStyle())
+
+        Button(action: onDone) {
+          Text("Done")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(MessagesPrimaryButtonStyle())
+      }
+      .padding(16)
     }
   }
 }
@@ -626,9 +592,9 @@ private struct LinkSummary: View {
     }
     .padding(12)
     .background(Color.white.opacity(0.08))
-    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .clipShape(CSTheme.card())
     .overlay(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
+      CSTheme.card()
         .stroke(Color.white.opacity(0.12), lineWidth: 1)
     )
   }
@@ -642,10 +608,13 @@ private struct MessagesPrimaryButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
       .font(.headline)
-      .foregroundStyle(.black)
+      .foregroundStyle(CSTheme.accentInk)
       .padding(.vertical, 13)
-      .background(configuration.isPressed ? Color.green.opacity(0.78) : Color.green)
-      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .background(LinearGradient(colors: [CSTheme.accent, CSTheme.accentDeep], startPoint: .top, endPoint: .bottom))
+      .clipShape(CSTheme.card())
+      .shadow(color: CSTheme.accent.opacity(configuration.isPressed ? 0.1 : 0.25), radius: 10, y: 4)
+      .scaleEffect(configuration.isPressed ? 0.97 : 1)
+      .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
   }
 }
 
@@ -656,6 +625,6 @@ private struct MessagesSecondaryButtonStyle: ButtonStyle {
       .foregroundStyle(.white)
       .padding(.vertical, 12)
       .background(configuration.isPressed ? Color.white.opacity(0.16) : Color.white.opacity(0.1))
-      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .clipShape(CSTheme.card())
   }
 }

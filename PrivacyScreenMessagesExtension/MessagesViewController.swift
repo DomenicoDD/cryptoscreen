@@ -80,8 +80,13 @@ final class MessagesComposeContext: ObservableObject {
   }
 
   func openInCryptoscreen(_ url: URL) async -> Bool {
-    await withCheckedContinuation { continuation in
-      messagesViewController?.extensionContext?.open(url) { [weak self] success in
+    guard let extensionContext = messagesViewController?.extensionContext else {
+      // Without a context the completion handler would never run and the continuation would leak.
+      return false
+    }
+
+    return await withCheckedContinuation { continuation in
+      extensionContext.open(url) { [weak self] success in
         if success {
           Task { @MainActor in
             self?.messagesViewController?.dismiss()
@@ -93,11 +98,7 @@ final class MessagesComposeContext: ObservableObject {
     }
   }
 
-  func insertSealedMessage(
-    _ createdMessage: CreatedSealedMessage,
-    includePINMessage: Bool,
-    dismissAfterInsert: Bool = false
-  ) async throws {
+  func insertSealedMessage(_ createdMessage: CreatedSealedMessage) async throws {
     guard let activeConversation else {
       throw MessagesComposeContextError.noActiveConversation
     }
@@ -106,48 +107,17 @@ final class MessagesComposeContext: ObservableObject {
     let layout = MSMessageTemplateLayout()
     layout.caption = "cryptoscreen"
     layout.subcaption = createdMessage.hasImageAttachment ? "Sealed message with image" : "Sealed message"
-    layout.trailingSubcaption = includePINMessage ? "PIN follows" : "Send PIN separately"
+    layout.trailingSubcaption = "PIN sent separately"
     message.layout = layout
     message.summaryText = "cryptoscreen sealed message"
     message.url = createdMessage.link
 
     try await insert(message, into: activeConversation)
-
-    if includePINMessage {
-      try await insertText("PIN: \(createdMessage.pin)", into: activeConversation)
-    }
-
-    if dismissAfterInsert {
-      dismiss()
-    }
-  }
-
-  func insertPIN(_ pin: String, dismissAfterInsert: Bool = false) async throws {
-    guard let activeConversation else {
-      throw MessagesComposeContextError.noActiveConversation
-    }
-    try await insertText("PIN: \(pin)", into: activeConversation)
-
-    if dismissAfterInsert {
-      dismiss()
-    }
   }
 
   private func insert(_ message: MSMessage, into conversation: MSConversation) async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       conversation.insert(message) { error in
-        if let error {
-          continuation.resume(throwing: error)
-        } else {
-          continuation.resume()
-        }
-      }
-    }
-  }
-
-  private func insertText(_ text: String, into conversation: MSConversation) async throws {
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-      conversation.insertText(text) { error in
         if let error {
           continuation.resume(throwing: error)
         } else {

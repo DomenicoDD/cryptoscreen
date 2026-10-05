@@ -4,6 +4,15 @@ struct ReaderLine: Identifiable, Equatable {
   let id: Int
   let text: String
   let attributedText: AttributedString
+  /// Scrambled glyphs for this line, computed once at layout time instead of on every render.
+  let hiddenText: String
+
+  init(id: Int, text: String, attributedText: AttributedString) {
+    self.id = id
+    self.text = text
+    self.attributedText = attributedText
+    hiddenText = CipherText.hiddenText(for: text, seed: id)
+  }
 }
 
 enum TextLineWrapper {
@@ -69,33 +78,39 @@ enum TextLineWrapper {
     var lines: [MarkdownLine] = []
     var currentRuns = block.firstPrefix
     var currentText = block.firstPrefix.map(\.text).joined()
+    var currentWidth = measuredWidth(currentText, font: font)
+    let continuationText = block.continuationPrefix.map(\.text).joined()
+    let continuationWidth = measuredWidth(continuationText, font: font)
 
     let tokens = tokenize(block.runs)
     for token in tokens {
-      if token.text.trimmingCharacters(in: .whitespaces).isEmpty,
-         currentText.trimmingCharacters(in: .whitespaces).isEmpty {
+      let tokenIsWhitespace = token.text.allSatisfy(\.isWhitespace)
+      if tokenIsWhitespace, currentText.allSatisfy(\.isWhitespace) {
         continue
       }
 
-      let candidate = currentText + token.text
-      if currentText.isEmpty || measuredWidth(candidate, font: font) <= maxWidth {
+      let tokenWidth = measuredWidth(token.text, font: font)
+      if currentText.isEmpty || currentWidth + tokenWidth <= maxWidth {
         append(token, to: &currentRuns, text: &currentText)
+        currentWidth += tokenWidth
         continue
       }
 
-      if !currentText.trimmingCharacters(in: .whitespaces).isEmpty {
+      if !currentText.allSatisfy(\.isWhitespace) {
         lines.append(MarkdownLine(runs: currentRuns, text: currentText.trimmingCharacters(in: .whitespaces)))
       }
 
       currentRuns = block.continuationPrefix
-      currentText = block.continuationPrefix.map(\.text).joined()
+      currentText = continuationText
+      currentWidth = continuationWidth
 
-      if token.text.trimmingCharacters(in: .whitespaces).isEmpty {
+      if tokenIsWhitespace {
         continue
       }
 
-      if measuredWidth(currentText + token.text, font: font) <= maxWidth {
+      if currentWidth + tokenWidth <= maxWidth {
         append(token, to: &currentRuns, text: &currentText)
+        currentWidth += tokenWidth
       } else {
         let splitRuns = splitTokenIfNeeded(token, prefixRuns: block.continuationPrefix, maxWidth: maxWidth, font: font)
         for splitRun in splitRuns.dropLast() {
@@ -105,6 +120,7 @@ enum TextLineWrapper {
         if let last = splitRuns.last {
           currentRuns = last.runs
           currentText = last.text
+          currentWidth = measuredWidth(currentText, font: font)
         }
       }
     }
@@ -127,20 +143,25 @@ enum TextLineWrapper {
     font: UIFont
   ) -> [MarkdownLine] {
     var lines: [MarkdownLine] = []
+    let prefixText = prefixRuns.map(\.text).joined()
+    let prefixWidth = measuredWidth(prefixText, font: font)
     var currentRuns = prefixRuns
-    var currentText = prefixRuns.map(\.text).joined()
+    var currentText = prefixText
+    var currentWidth = prefixWidth
 
     for character in token.text {
       let next = String(character)
-      let candidate = currentText + next
+      let nextWidth = measuredWidth(next, font: font)
 
-      if currentText == prefixRuns.map(\.text).joined() || measuredWidth(candidate, font: font) <= maxWidth {
+      if currentText == prefixText || currentWidth + nextWidth <= maxWidth {
         append(token.copy(text: next), to: &currentRuns, text: &currentText)
+        currentWidth += nextWidth
       } else {
         lines.append(MarkdownLine(runs: currentRuns, text: currentText))
         currentRuns = prefixRuns
-        currentText = prefixRuns.map(\.text).joined()
+        currentText = prefixText
         append(token.copy(text: next), to: &currentRuns, text: &currentText)
+        currentWidth = prefixWidth + nextWidth
       }
     }
 
@@ -285,8 +306,8 @@ enum TextLineWrapper {
     _ characters: [Character],
     startIndex: Int
   ) -> (text: String, url: URL, nextIndex: Int)? {
-    let remaining = String(characters[startIndex...])
-    guard remaining.hasPrefix("https://") || remaining.hasPrefix("http://") else {
+    guard characters[startIndex] == "h",
+          hasPrefix(characters, at: startIndex, "https://") || hasPrefix(characters, at: startIndex, "http://") else {
       return nil
     }
 
@@ -303,6 +324,17 @@ enum TextLineWrapper {
     }
 
     return (trimmedURLText, url, startIndex + trimmedURLText.count)
+  }
+
+  private static func hasPrefix(_ characters: [Character], at startIndex: Int, _ prefix: String) -> Bool {
+    var index = startIndex
+    for character in prefix {
+      guard index < characters.count, characters[index] == character else {
+        return false
+      }
+      index += 1
+    }
+    return true
   }
 
   private static func parseDelimitedStyle(

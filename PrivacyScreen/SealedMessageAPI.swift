@@ -90,8 +90,14 @@ struct SealedMessageAPI {
           tag: tag,
           salt: salt
         )
-        let plaintext = try SealedMessageCrypto.open(payload, request: request, pin: pin)
-        let attachment = try await openAttachmentIfPresent(response.attachment, request: request, pin: pin, salt: salt)
+        // The server has already consumed the row at this point, so never turn a
+        // local failure into a retryable-looking network error.
+        guard let plaintext = try? SealedMessageCrypto.open(payload, request: request, pin: pin) else {
+          return .corrupted
+        }
+
+        // If only the image fails, still show the text rather than losing the whole message.
+        let attachment = try? await openAttachmentIfPresent(response.attachment, request: request, pin: pin, salt: salt)
         return .opened(
           OpenedSealedMessage(
             plaintext: plaintext,
@@ -142,14 +148,14 @@ struct SealedMessageAPI {
     )
   }
 
-  func expire(message: SentMessageRecord) async throws -> SealedMessageRemoteDeliveryStatus {
-    guard let request = SealedMessageCrypto.request(from: message.link) else {
+  func expire(messageID: UUID, link: URL) async throws -> SealedMessageRemoteDeliveryStatus {
+    guard let request = SealedMessageCrypto.request(from: link) else {
       throw SealedMessageAPIError.invalidResponse
     }
 
     let body = ExpireMessageRequest(revokeProof: SealedMessageCrypto.revokeProof(request: request).base64URLEncodedString())
     let response: MessageStatusResponse = try await send(
-      path: "/api/messages/\(message.id.uuidString.lowercased())/expire",
+      path: "/api/messages/\(messageID.uuidString.lowercased())/expire",
       method: "POST",
       body: body
     )
@@ -298,7 +304,7 @@ struct SealedMessageAPI {
       throw SealedMessageAPIError.invalidResponse
     }
 
-    var request = URLRequest(url: url)
+    var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
     request.httpMethod = method
     request.setValue("application/json", forHTTPHeaderField: "Accept")
 

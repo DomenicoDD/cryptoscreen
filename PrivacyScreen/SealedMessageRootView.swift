@@ -13,13 +13,13 @@ private let interactionStatusSharingOptInKey = "cryptoscreen.reporting.screensho
 private let onboardingReaderMessage = """
 This is a cryptoscreen message.
 
-Everything starts locked. Each paragraph opens only when you hold the eye control and slide with intent.
+Everything starts scrambled. Cover the glowing zone at the top of the screen with your hand, and the lines just below it become readable.
 
-Only the active paragraph becomes readable. Move down when you need the next section, and the note returns to static between steps.
+Only those few lines decrypt at a time. Scroll to bring the next lines under your hand; lift it away and the note falls back to static.
 
 The message can be opened once. After it is read, it is deleted from the server. The PIN is never inside the link, so the sender must give it to the reader separately.
 
-Try unlocking this paragraph, then move to the next one.
+Try it now: cover the zone, then scroll.
 """
 
 private func sealedMessageShareText(for link: URL) -> String {
@@ -67,19 +67,6 @@ enum SentMessageStatus: String, Codable {
       return "Expired"
     case .destroyed:
       return "Destroyed"
-    }
-  }
-
-  var tint: Color {
-    switch self {
-    case .active:
-      return Color(red: 0.48, green: 1.0, blue: 0.70)
-    case .consumed:
-      return Color(red: 0.84, green: 0.92, blue: 1.0)
-    case .expired:
-      return Color(red: 1.0, green: 0.68, blue: 0.38)
-    case .destroyed:
-      return Color(red: 1.0, green: 0.42, blue: 0.42)
     }
   }
 }
@@ -250,7 +237,7 @@ final class SealedMessageStore: ObservableObject {
   }
 
   func expireSentMessage(_ message: SentMessageRecord) async throws {
-    let remoteStatus = try await api.expire(message: message)
+    let remoteStatus = try await api.expire(messageID: message.id, link: message.link)
     updateSentMessageDeliveryStatus(id: message.id, remoteStatus: remoteStatus)
   }
 
@@ -260,18 +247,40 @@ final class SealedMessageStore: ObservableObject {
   }
 
   func refreshSentMessageStatuses(allowsInteractionStatus: Bool) async {
-    guard allowsInteractionStatus else {
-      return
+    // Basic availability is independent of optional read/screenshot sharing.
+    let messagesToRefresh = sentMessages.filter {
+      $0.status == .active || (allowsInteractionStatus && $0.status == .consumed)
     }
+    guard !messagesToRefresh.isEmpty else { return }
 
-    for message in sentMessages where message.status == .active || message.status == .consumed {
-      do {
-        let remoteStatus = try await api.status(messageID: message.id)
-        updateSentMessageDeliveryStatus(id: message.id, remoteStatus: remoteStatus)
-      } catch {
-        continue
+    // Fetch in parallel (bounded) instead of one round-trip at a time, then
+    // apply and persist once instead of re-encoding the list per message.
+    let api = self.api
+    let maxConcurrentRequests = 4
+    var results: [(UUID, SealedMessageRemoteDeliveryStatus)] = []
+    await withTaskGroup(of: (UUID, SealedMessageRemoteDeliveryStatus)?.self) { group in
+      var pending = messagesToRefresh.map(\.id)[...]
+
+      func enqueueNext() {
+        guard let id = pending.popFirst() else { return }
+        group.addTask {
+          guard !Task.isCancelled, let status = try? await api.status(messageID: id) else { return nil }
+          return (id, status)
+        }
+      }
+
+      for _ in 0..<maxConcurrentRequests { enqueueNext() }
+      for await result in group {
+        if let result { results.append(result) }
+        enqueueNext()
       }
     }
+
+    guard !Task.isCancelled, !results.isEmpty else { return }
+    for (id, remoteStatus) in results {
+      updateSentMessageDeliveryStatus(id: id, remoteStatus: remoteStatus, allowsInteractionStatus: allowsInteractionStatus, persists: false)
+    }
+    persistSentMessages()
   }
 
   func submitFeedback(rating: Int, message: String) async throws {
@@ -336,18 +345,21 @@ final class SealedMessageStore: ObservableObject {
     persistSentMessages()
   }
 
-  private func updateSentMessageDeliveryStatus(id: UUID, remoteStatus: SealedMessageRemoteDeliveryStatus) {
+  private func updateSentMessageDeliveryStatus(id: UUID, remoteStatus: SealedMessageRemoteDeliveryStatus, allowsInteractionStatus: Bool = true, persists: Bool = true) {
     guard let index = sentMessages.firstIndex(where: { $0.id == id }) else {
       return
     }
 
     sentMessages[index].status = SentMessageStatus(remoteStatus.status)
-    sentMessages[index].interactionStatusShared = remoteStatus.interactionStatusShared
-    sentMessages[index].hasImageAttachment = sentMessages[index].hasImageAttachment || remoteStatus.imageAttachmentAttached
-    sentMessages[index].textConsumed = remoteStatus.textConsumed
-    sentMessages[index].imageConsumed = remoteStatus.imageAttachmentConsumed
-    sentMessages[index].screenshotDetected = remoteStatus.screenshotDetected
-    persistSentMessages()
+    let sharesDetails = allowsInteractionStatus && remoteStatus.interactionStatusShared
+    sentMessages[index].interactionStatusShared = sharesDetails
+    sentMessages[index].hasImageAttachment = sentMessages[index].hasImageAttachment || (sharesDetails && remoteStatus.imageAttachmentAttached)
+    sentMessages[index].textConsumed = sharesDetails && remoteStatus.textConsumed
+    sentMessages[index].imageConsumed = sharesDetails && remoteStatus.imageAttachmentConsumed
+    sentMessages[index].screenshotDetected = sharesDetails && remoteStatus.screenshotDetected
+    if persists {
+      persistSentMessages()
+    }
   }
 
   private func persistSentMessages() {
@@ -371,6 +383,9 @@ final class SealedMessageStore: ObservableObject {
 }
 
 struct SealedMessageRootView: View {
+  @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.requestReview) private var requestReview
+  @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
   @StateObject private var store = SealedMessageStore()
   @StateObject private var proImageEntitlements = ProImageEntitlementStore()
   @AppStorage("cryptoscreen.hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -383,7 +398,6 @@ struct SealedMessageRootView: View {
   @State private var isShowingSentMessages = false
   @State private var isShowingPrivacySettings = false
   @State private var isShowingAnonymousFeedback = false
-  @State private var isShowingReviewPrompt = false
 #if !APPCLIP && (DEBUG || READER_LAB)
   @State private var isShowingReaderLab = false
 #endif
@@ -393,13 +407,16 @@ struct SealedMessageRootView: View {
 
   var body: some View {
     mainInterface
+      .task(id: scenePhase) {
+        guard scenePhase == .active else { return }
+        await store.refreshSentMessageStatuses(allowsInteractionStatus: sharesInteractionStatus)
+      }
   }
 
   private var mainInterface: some View {
     CaptureShield {
       ZStack {
-        Color(red: 0.045, green: 0.047, blue: 0.043)
-          .ignoresSafeArea()
+        CSBackground()
 
         VStack(spacing: 0) {
           HeaderView(
@@ -443,15 +460,9 @@ struct SealedMessageRootView: View {
             .padding(.bottom, 32)
           }
 #else
-          Picker("Mode", selection: $mode) {
-            ForEach(MessageMode.allCases) { mode in
-              Label(mode.title, systemImage: mode.systemImage)
-                .tag(mode)
-            }
-          }
-          .pickerStyle(.segmented)
-          .padding(.horizontal, 20)
-          .padding(.bottom, 16)
+          ModeSwitcher(selection: $mode)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 18)
 
           ScrollView(.vertical, showsIndicators: false) {
             VStack(spacing: 22) {
@@ -463,7 +474,12 @@ struct SealedMessageRootView: View {
                   onCreatedLink: { link in
                     incomingLink = link.absoluteString
                     if ReviewPromptTracker.recordSuccessfulSend() {
-                      isShowingReviewPrompt = true
+                      // Apple's own prompt, asked of everyone at a good moment (after a
+                      // successful send). The system decides whether to show it.
+                      Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        requestReview()
+                      }
                     }
                   },
                   onTestMessage: { message, plaintext, imageData in
@@ -474,19 +490,23 @@ struct SealedMessageRootView: View {
                     )
                   }
                 )
+                .transition(.opacity.combined(with: .offset(y: 8)))
               case .open:
                 OpenSealedMessageView(
-                store: store,
-                initialLink: incomingLink,
-                initialPIN: incomingPIN
-              ) { openedMessage in
-                openedSession = ReaderSession(message: openedMessage)
-              }
+                  store: store,
+                  initialLink: incomingLink,
+                  initialPIN: incomingPIN
+                ) { openedMessage in
+                  openedSession = ReaderSession(message: openedMessage)
+                }
+                .transition(.opacity.combined(with: .offset(y: 8)))
               }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 32)
+            .animation(.easeOut(duration: 0.22), value: mode)
           }
+          .scrollDismissesKeyboard(.interactively)
 #endif
         }
       }
@@ -508,24 +528,11 @@ struct SealedMessageRootView: View {
     }
     .sheet(isPresented: $isShowingAnonymousFeedback) {
       CryptoscreenReviewPrompt(
-        startsWithFeedback: true,
         sendFeedback: { feedback in
           try await store.submitFeedback(rating: 2, message: feedback)
         },
         onDone: {
           isShowingAnonymousFeedback = false
-        }
-      )
-      .presentationDetents([.medium, .large])
-      .presentationDragIndicator(.visible)
-    }
-    .sheet(isPresented: $isShowingReviewPrompt) {
-      CryptoscreenReviewPrompt(
-        sendFeedback: { feedback in
-          try await store.submitFeedback(rating: 2, message: feedback)
-        },
-        onDone: {
-          isShowingReviewPrompt = false
         }
       )
       .presentationDetents([.medium, .large])
@@ -551,7 +558,7 @@ struct SealedMessageRootView: View {
       }
       .presentationDetents([.large])
       .presentationDragIndicator(.visible)
-      .presentationBackground(Color(red: 0.045, green: 0.047, blue: 0.043))
+      .presentationBackground(CSTheme.background)
     }
     .onAppear {
       if !hasCompletedOnboarding {
@@ -587,6 +594,22 @@ struct SealedMessageRootView: View {
   }
 }
 
+// Kept outside the model/store section, which tests compile without the UI theme.
+extension SentMessageStatus {
+  var tint: Color {
+    switch self {
+    case .active:
+      return CSTheme.accent
+    case .consumed:
+      return CSTheme.info
+    case .expired:
+      return CSTheme.warning
+    case .destroyed:
+      return CSTheme.danger
+    }
+  }
+}
+
 private struct HeaderView: View {
   let pendingCount: Int
   let onShowSentMessages: () -> Void
@@ -597,13 +620,15 @@ private struct HeaderView: View {
   let onShowPro: () -> Void
 
   var body: some View {
-    HStack(alignment: .center) {
-      VStack(alignment: .leading, spacing: 4) {
+    HStack(alignment: .center, spacing: 12) {
+      BrandMark()
+
+      VStack(alignment: .leading, spacing: 2) {
         Text("cryptoscreen")
-          .font(.system(size: 24, weight: .semibold, design: .rounded))
+          .font(CSTheme.rounded(22, .bold))
         Text("sealed one-time messages")
-          .font(.system(size: 13, weight: .medium, design: .rounded))
-          .foregroundStyle(Color.white.opacity(0.56))
+          .font(CSTheme.rounded(12, .medium))
+          .foregroundStyle(Color.white.opacity(0.52))
       }
 
       Spacer()
@@ -613,15 +638,22 @@ private struct HeaderView: View {
           onShowSentMessages()
           softHaptic()
         } label: {
-          Label("\(pendingCount)", systemImage: "lock.doc")
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .foregroundStyle(Color(red: 0.84, green: 0.92, blue: 1.0))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 8)
-            .background(Color.white.opacity(0.08), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+          HStack(spacing: 6) {
+            Image(systemName: "paperplane.fill")
+              .font(.system(size: 12, weight: .semibold))
+            Text("\(pendingCount)")
+              .font(CSTheme.rounded(14, .bold))
+              .monospacedDigit()
+              .contentTransition(.numericText())
+          }
+          .foregroundStyle(pendingCount > 0 ? CSTheme.accent : CSTheme.inkSecondary)
+          .padding(.horizontal, 12)
+          .frame(height: 36)
+          .background(Color.white.opacity(0.08), in: Capsule())
+          .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CSPressableButtonStyle())
+        .animation(.snappy, value: pendingCount)
         .accessibilityLabel("\(pendingCount) active sent messages")
 
         Menu {
@@ -667,20 +699,103 @@ private struct HeaderView: View {
             Label("Website", systemImage: "safari")
           }
         } label: {
-          Image(systemName: "info.circle")
-            .font(.system(size: 18, weight: .semibold))
-            .frame(width: 36, height: 36)
-            .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-            .background(Color.white.opacity(0.08), in: Circle())
-            .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
+          CSIconButtonLabel(systemImage: "ellipsis", size: 36)
         }
-        .accessibilityLabel("Information")
+        .accessibilityLabel("More")
       }
     }
-    .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+    .foregroundStyle(CSTheme.ink)
     .padding(.horizontal, 20)
-    .padding(.top, 18)
-    .padding(.bottom, 18)
+    .padding(.top, 14)
+    .padding(.bottom, 20)
+  }
+}
+
+/// Small app glyph: an eye-slash in a mint tile, echoing the "cover to read" idea.
+private struct BrandMark: View {
+  var body: some View {
+    Image(systemName: "eye.slash.fill")
+      .font(.system(size: 17, weight: .bold))
+      .foregroundStyle(CSTheme.accentInk)
+      .frame(width: 40, height: 40)
+      .background(
+        LinearGradient(colors: [CSTheme.accent, CSTheme.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
+        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+      )
+      .shadow(color: CSTheme.accent.opacity(0.28), radius: 12, y: 4)
+      .accessibilityHidden(true)
+  }
+}
+
+/// Segmented control with a sliding mint pill, used instead of the stock
+/// segmented picker so every switch in the app shares one look.
+private struct PillSegmentedControl<Value: Hashable>: View {
+  struct Option: Identifiable {
+    let value: Value
+    let title: String
+    var systemImage: String?
+    var id: Value { value }
+  }
+
+  @Binding var selection: Value
+  let options: [Option]
+  var height: CGFloat = 40
+  var fontSize: CGFloat = 15
+  @Namespace private var pill
+
+  var body: some View {
+    HStack(spacing: 4) {
+      ForEach(options) { option in
+        let isSelected = option.value == selection
+
+        Button {
+          guard option.value != selection else { return }
+          withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            selection = option.value
+          }
+          CSHaptics.selection()
+        } label: {
+          Group {
+            if let systemImage = option.systemImage {
+              Label(option.title, systemImage: systemImage)
+            } else {
+              Text(option.title)
+            }
+          }
+          .font(CSTheme.rounded(fontSize, .semibold))
+          .lineLimit(1)
+          .minimumScaleFactor(0.8)
+          .foregroundStyle(isSelected ? CSTheme.accentInk : CSTheme.inkSecondary)
+          .frame(maxWidth: .infinity)
+          .frame(height: height)
+          .background {
+            if isSelected {
+              Capsule()
+                .fill(LinearGradient(colors: [CSTheme.accent, CSTheme.accentDeep.opacity(0.9)], startPoint: .top, endPoint: .bottom))
+                .shadow(color: CSTheme.accent.opacity(0.22), radius: 10, y: 3)
+                .matchedGeometryEffect(id: "pill", in: pill)
+            }
+          }
+          .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+      }
+    }
+    .padding(4)
+    .background(Color.white.opacity(0.06), in: Capsule())
+    .overlay(Capsule().strokeBorder(CSTheme.stroke, lineWidth: 1))
+  }
+}
+
+private struct ModeSwitcher: View {
+  @Binding var selection: MessageMode
+
+  var body: some View {
+    PillSegmentedControl(
+      selection: $selection,
+      options: MessageMode.allCases.map { .init(value: $0, title: $0.title, systemImage: $0.systemImage) }
+    )
   }
 }
 
@@ -690,7 +805,7 @@ private struct PrivacySettingsView: View {
 
   var body: some View {
     ZStack {
-      Color(red: 0.045, green: 0.047, blue: 0.043)
+      CSTheme.background
         .ignoresSafeArea()
 
       ScrollView(.vertical, showsIndicators: true) {
@@ -699,7 +814,7 @@ private struct PrivacySettingsView: View {
             VStack(alignment: .leading, spacing: 4) {
               Text("Privacy Settings")
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+                .foregroundStyle(CSTheme.ink)
 
               Text("Read receipts are reciprocal.")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -715,7 +830,7 @@ private struct PrivacySettingsView: View {
               Image(systemName: "xmark")
                 .font(.system(size: 15, weight: .bold))
                 .frame(width: 40, height: 40)
-                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+                .foregroundStyle(CSTheme.ink)
                 .background(Color.white.opacity(0.08), in: Circle())
                 .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
@@ -727,7 +842,7 @@ private struct PrivacySettingsView: View {
               VStack(alignment: .leading, spacing: 5) {
                 Text("Share interaction status")
                   .font(.system(size: 16, weight: .semibold, design: .rounded))
-                  .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+                  .foregroundStyle(CSTheme.ink)
 
                 Text("Off by default. When enabled, your app can share limited read and screenshot status while you read sealed messages. You can see detailed interaction status on messages you sent only when the reader also shared it.")
                   .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -735,7 +850,7 @@ private struct PrivacySettingsView: View {
                   .fixedSize(horizontal: false, vertical: true)
               }
             }
-            .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
+            .tint(CSTheme.accent)
 
             Text("One-time links still reveal basic availability: if a link no longer opens, someone with the link can infer it was opened, expired, destroyed, or manually expired. Interaction status is separate and works both ways only when you enable it.")
               .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -743,8 +858,8 @@ private struct PrivacySettingsView: View {
               .fixedSize(horizontal: false, vertical: true)
           }
           .padding(16)
-          .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+          .background(Color.white.opacity(0.055), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+          .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.09), lineWidth: 1))
         }
         .padding(.horizontal, 20)
         .padding(.top, 22)
@@ -756,6 +871,7 @@ private struct PrivacySettingsView: View {
 
 private struct SentMessagesView: View {
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.scenePhase) private var scenePhase
   @ObservedObject var store: SealedMessageStore
   @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
   @State private var showsPins = false
@@ -765,7 +881,7 @@ private struct SentMessagesView: View {
 
   var body: some View {
     ZStack {
-      Color(red: 0.045, green: 0.047, blue: 0.043)
+      CSTheme.background
         .ignoresSafeArea()
 
       VStack(alignment: .leading, spacing: 18) {
@@ -773,7 +889,7 @@ private struct SentMessagesView: View {
           VStack(alignment: .leading, spacing: 4) {
             Text("Sent messages")
               .font(.system(size: 24, weight: .semibold, design: .rounded))
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
 
             Text("\(store.pendingCount) active")
               .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -789,7 +905,7 @@ private struct SentMessagesView: View {
             Image(systemName: showsPins ? "eye.slash.fill" : "eye.fill")
               .font(.system(size: 16, weight: .semibold))
               .frame(width: 40, height: 40)
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
               .background(Color.white.opacity(0.08), in: Circle())
               .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
           }
@@ -802,7 +918,7 @@ private struct SentMessagesView: View {
             Image(systemName: "xmark")
               .font(.system(size: 15, weight: .bold))
               .frame(width: 40, height: 40)
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
               .background(Color.white.opacity(0.08), in: Circle())
               .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
           }
@@ -813,7 +929,7 @@ private struct SentMessagesView: View {
           VStack(alignment: .leading, spacing: 10) {
             Text("No sent messages yet.")
               .font(.system(size: 17, weight: .semibold, design: .rounded))
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
 
             Text("Sealed messages created on this device will appear here.")
               .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -822,8 +938,8 @@ private struct SentMessagesView: View {
           }
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(16)
-          .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+          .background(Color.white.opacity(0.055), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+          .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.09), lineWidth: 1))
         } else {
           ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 12) {
@@ -859,15 +975,24 @@ private struct SentMessagesView: View {
           StatusLine(
             text: actionErrorMessage,
             systemImage: "exclamationmark.triangle.fill",
-            tint: Color(red: 1.0, green: 0.68, blue: 0.38)
+            tint: CSTheme.warning
           )
         }
       }
       .padding(.horizontal, 20)
       .padding(.top, 22)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
-    .task(id: sharesInteractionStatus) {
-      await store.refreshSentMessageStatuses(allowsInteractionStatus: sharesInteractionStatus)
+    .task(id: "\(scenePhase)-\(sharesInteractionStatus)") {
+      guard scenePhase == .active else { return }
+      while !Task.isCancelled {
+        await store.refreshSentMessageStatuses(allowsInteractionStatus: sharesInteractionStatus)
+        do {
+          try await Task.sleep(for: .seconds(30))
+        } catch {
+          return
+        }
+      }
     }
   }
 
@@ -910,7 +1035,7 @@ private struct SentMessageRow: View {
       HStack(alignment: .firstTextBaseline) {
         Text(message.createdAt.formatted(date: .abbreviated, time: .shortened))
           .font(.system(size: 14, weight: .semibold, design: .rounded))
-          .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+          .foregroundStyle(CSTheme.ink)
 
         Spacer()
 
@@ -976,8 +1101,8 @@ private struct SentMessageRow: View {
       .buttonStyle(SecondaryActionButtonStyle())
     }
     .padding(14)
-    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+    .background(Color.white.opacity(0.055), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+    .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.09), lineWidth: 1))
   }
 }
 
@@ -998,8 +1123,8 @@ private struct InteractionStatusLockedView: View {
     .foregroundStyle(Color.white.opacity(0.42))
     .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
     .padding(.horizontal, 12)
-    .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.08), lineWidth: 1))
+    .background(Color.white.opacity(0.045), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+    .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.08), lineWidth: 1))
     .accessibilityLabel(accessibilityLabel)
   }
 }
@@ -1039,7 +1164,7 @@ private struct SentMessageDeliveryGrid: View {
         title: "Screenshot",
         systemImage: message.screenshotDetected ? "camera.viewfinder" : "camera",
         isActive: message.screenshotDetected,
-        activeTint: Color(red: 1.0, green: 0.42, blue: 0.42)
+        activeTint: CSTheme.danger
       )
     }
   }
@@ -1050,7 +1175,7 @@ private struct SentMessageSignal: View {
   let systemImage: String
   let isActive: Bool
   var isNeutral = false
-  var activeTint = Color(red: 0.48, green: 1.0, blue: 0.70)
+  var activeTint = CSTheme.accent
 
   private var tint: Color {
     if isNeutral {
@@ -1075,8 +1200,8 @@ private struct SentMessageSignal: View {
     .padding(.horizontal, 9)
     .padding(.vertical, 7)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color.white.opacity(isActive ? 0.085 : 0.045), in: RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(isActive ? 0.34 : 0.16), lineWidth: 1))
+    .background(Color.white.opacity(isActive ? 0.085 : 0.045), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+    .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(tint.opacity(isActive ? 0.34 : 0.16), lineWidth: 1))
   }
 }
 
@@ -1091,7 +1216,7 @@ private struct SentMessageMetric: View {
 
       Text(value)
         .font(.system(size: 15, weight: .semibold, design: .monospaced))
-        .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+        .foregroundStyle(CSTheme.ink)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -1219,7 +1344,7 @@ private struct ComposeSealedMessageView: View {
           ZStack(alignment: .bottomTrailing) {
             TextEditor(text: $message)
               .font(.system(size: 16, weight: .regular, design: .rounded))
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
               .scrollContentBackground(.hidden)
               .focused($focusedField, equals: .message)
               .frame(minHeight: 146)
@@ -1233,11 +1358,11 @@ private struct ComposeSealedMessageView: View {
               .monospacedDigit()
               .padding(.horizontal, 8)
               .padding(.vertical, 5)
-              .background(Color(red: 0.045, green: 0.047, blue: 0.043).opacity(0.82), in: Capsule())
+              .background(CSTheme.background.opacity(0.82), in: Capsule())
               .padding(10)
           }
-          .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
-          .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+          .background(Color.white.opacity(0.065), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+          .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.10), lineWidth: 1))
         }
 
 #if !APPCLIP
@@ -1315,7 +1440,7 @@ private struct ComposeSealedMessageView: View {
         }
 
         if let errorMessage {
-          StatusLine(text: errorMessage, systemImage: "exclamationmark.triangle.fill", tint: Color(red: 1.0, green: 0.68, blue: 0.38))
+          StatusLine(text: errorMessage, systemImage: "exclamationmark.triangle.fill", tint: CSTheme.warning)
         }
       }
     }
@@ -1374,13 +1499,13 @@ private struct ComposeSealedMessageView: View {
     VStack(alignment: .leading, spacing: 10) {
       FieldHeader(title: "Read availability", isClearEnabled: false) {}
 
-      Picker("Read availability", selection: $readPolicyRawValue) {
-        ForEach(SealedMessageReadPolicy.allCases, id: \.rawValue) { policy in
-          Text(policy.title).tag(policy.rawValue)
-        }
-      }
-      .pickerStyle(.segmented)
-      .tint(Color(red: 0.48, green: 0.96, blue: 0.54))
+      PillSegmentedControl(
+        selection: $readPolicyRawValue,
+        options: SealedMessageReadPolicy.allCases.map { .init(value: $0.rawValue, title: $0.title) },
+        height: 34,
+        fontSize: 14
+      )
+      .accessibilityLabel("Read availability")
       .onChange(of: readPolicyRawValue) { _, _ in
         createdMessage = nil
         createdPlaintext = nil
@@ -1419,7 +1544,7 @@ private struct ComposeSealedMessageView: View {
         throw SealedMessageError.invalidAttachment
       }
 
-      let normalized = try normalizeImageAttachment(data)
+      let normalized = try await ImageAttachmentPreparer.prepare(data)
       selectedImageData = normalized.data
       selectedImagePreview = normalized.preview
       createdMessage = nil
@@ -1496,7 +1621,7 @@ private struct ComposeSealedMessageView: View {
       }
 
       onCreatedLink(sealed.link)
-      UINotificationFeedbackGenerator().notificationOccurred(.success)
+      CSHaptics.success()
     } catch SealedMessageError.invalidPIN {
       withAnimation(.easeInOut(duration: 0.18)) {
         sealingText = nil
@@ -1673,7 +1798,7 @@ private struct ImageAttachmentPicker: View {
             Text("Remove")
               .font(.system(size: 12, weight: .semibold, design: .rounded))
               .textCase(.uppercase)
-              .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70))
+              .foregroundStyle(CSTheme.accent)
           }
           .buttonStyle(.plain)
           .accessibilityLabel("Remove image")
@@ -1686,14 +1811,14 @@ private struct ImageAttachmentPicker: View {
             .resizable()
             .scaledToFill()
             .frame(width: 72, height: 72)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            .clipShape(CSTheme.card(CSTheme.smallCornerRadius + 2))
+            .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.12), lineWidth: 1))
             .accessibilityHidden(true)
 
           VStack(alignment: .leading, spacing: 6) {
             Text("Image attached")
               .font(.system(size: 15, weight: .semibold, design: .rounded))
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
 
             Text("Ready to seal once.")
               .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -1702,8 +1827,8 @@ private struct ImageAttachmentPicker: View {
           }
         }
         .padding(12)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+        .background(Color.white.opacity(0.055), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+        .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.09), lineWidth: 1))
       } else if isUnlocked {
         PhotosPicker(selection: $selection, matching: .images, photoLibrary: .shared()) {
           Label(isPreparing ? "Preparing image..." : "Attach encrypted image", systemImage: isPreparing ? "hourglass" : "photo.badge.plus")
@@ -1733,7 +1858,7 @@ private struct ComposeStepTitle: View {
     VStack(alignment: .leading, spacing: 3) {
       Text("\(number). \(title)")
         .font(.system(size: 16, weight: .semibold, design: .rounded))
-        .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+        .foregroundStyle(CSTheme.ink)
 
       if let note {
         Text(note)
@@ -1748,6 +1873,16 @@ private struct ComposeStepTitle: View {
 private struct SealingTransitionView: View, Animatable {
   let text: String
   var progress: Double
+  // Computed once per view value rather than on every animation frame.
+  private let characters: [Character]
+  private let encryptedCharacters: [Character]
+
+  init(text: String, progress: Double) {
+    self.text = text
+    self.progress = progress
+    characters = Array(text)
+    encryptedCharacters = Array(CipherText.hiddenText(for: text, seed: 831))
+  }
 
   var animatableData: Double {
     get { progress }
@@ -1755,8 +1890,6 @@ private struct SealingTransitionView: View, Animatable {
   }
 
   private var displayText: String {
-    let characters = Array(text)
-    let encryptedCharacters = Array(CipherText.hiddenText(for: text, seed: 831))
     let encryptedCount = min(characters.count, Int((Double(characters.count) * progress).rounded(.up)))
 
     return String(characters.indices.map { index in
@@ -1768,7 +1901,7 @@ private struct SealingTransitionView: View, Animatable {
     VStack(alignment: .leading, spacing: 0) {
       Text(displayText)
         .font(.system(size: 17, weight: .regular, design: .monospaced))
-        .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+        .foregroundStyle(CSTheme.ink)
         .lineSpacing(6)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1792,7 +1925,7 @@ private struct CreatedMessagePanel: View {
           ? "Sealed on cryptoscreen.app with encrypted image ciphertext."
           : "Sealed on cryptoscreen.app. The server stores ciphertext only.",
         systemImage: "checkmark.seal.fill",
-        tint: Color(red: 0.50, green: 0.92, blue: 0.68)
+        tint: CSTheme.success
       )
 
       VStack(alignment: .leading, spacing: 8) {
@@ -1858,8 +1991,8 @@ private struct CreatedMessagePanel: View {
       }
     }
     .padding(14)
-    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
-    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.09), lineWidth: 1))
+    .background(Color.white.opacity(0.055), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+    .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.09), lineWidth: 1))
   }
 }
 
@@ -1901,7 +2034,7 @@ private struct OpenSealedMessageView: View {
               .textInputAutocapitalization(.never)
               .autocorrectionDisabled()
               .font(.system(size: 14, weight: .medium, design: .monospaced))
-              .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+              .foregroundStyle(CSTheme.ink)
               .tint(Color.white.opacity(0.58))
               .accessibilityLabel("Message link")
           }
@@ -1923,8 +2056,8 @@ private struct OpenSealedMessageView: View {
         .padding(.leading, 14)
         .padding(.trailing, 8)
         .padding(.vertical, 9)
-        .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+        .background(Color.white.opacity(0.065), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+        .overlay(CSTheme.card(CSTheme.smallCornerRadius + 2).stroke(Color.white.opacity(0.10), lineWidth: 1))
       }
 
       VStack(alignment: .leading, spacing: 10) {
@@ -1986,45 +2119,45 @@ private struct OpenSealedMessageView: View {
           ? "Consumed. The encrypted row was deleted before rendering."
           : "Consumed. The encrypted row and image object are no longer reusable."
       statusIcon = openedMessage.retained ? "arrow.triangle.2.circlepath" : "flame.fill"
-      statusTint = Color(red: 0.50, green: 0.92, blue: 0.68)
+      statusTint = CSTheme.success
       onOpen(openedMessage)
       softHaptic()
     case .wrongPin(let remainingAttempts):
       pin = ""
       status = "\(remainingAttempts) PIN attempt\(remainingAttempts == 1 ? "" : "s") remaining."
       statusIcon = "key.slash.fill"
-      statusTint = Color(red: 1.0, green: 0.68, blue: 0.38)
+      statusTint = CSTheme.warning
       warningHaptic()
     case .destroyed:
       pin = ""
       status = "Destroyed after the third wrong PIN."
       statusIcon = "trash.fill"
-      statusTint = Color(red: 1.0, green: 0.42, blue: 0.42)
+      statusTint = CSTheme.danger
       warningHaptic()
     case .expired:
       status = "This message expired and was deleted."
       statusIcon = "clock.badge.xmark.fill"
-      statusTint = Color(red: 1.0, green: 0.42, blue: 0.42)
+      statusTint = CSTheme.danger
     case .unavailable:
       status = "No sealed message exists for this link."
       statusIcon = "questionmark.folder.fill"
-      statusTint = Color(red: 1.0, green: 0.68, blue: 0.38)
+      statusTint = CSTheme.warning
     case .invalidLink:
       status = "The link is missing a message id or secret."
       statusIcon = "link.badge.plus"
-      statusTint = Color(red: 1.0, green: 0.68, blue: 0.38)
+      statusTint = CSTheme.warning
     case .invalidPin:
       status = "Enter exactly six digits."
       statusIcon = "number"
-      statusTint = Color(red: 1.0, green: 0.68, blue: 0.38)
+      statusTint = CSTheme.warning
     case .corrupted:
       status = "Payload could not be decrypted and was deleted."
       statusIcon = "exclamationmark.lock.fill"
-      statusTint = Color(red: 1.0, green: 0.42, blue: 0.42)
+      statusTint = CSTheme.danger
     case .networkFailed:
       status = "Could not reach cryptoscreen.app."
       statusIcon = "wifi.exclamationmark"
-      statusTint = Color(red: 1.0, green: 0.68, blue: 0.38)
+      statusTint = CSTheme.warning
     }
   }
 }
@@ -2035,19 +2168,52 @@ private struct PinEntryField: View {
   let accessibilityLabel: String
 
   var body: some View {
-    TextField(placeholder, text: $pin)
-      .keyboardType(.numberPad)
-      .textInputAutocapitalization(.never)
-      .autocorrectionDisabled()
-      .font(.system(size: 22, weight: .semibold, design: .monospaced))
-      .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-      .lineLimit(1)
-      .privacySensitive()
-      .accessibilityLabel(accessibilityLabel)
-      .padding(.horizontal, 14)
-      .frame(maxWidth: .infinity, minHeight: 52)
-      .background(Color.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 8))
-      .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.10), lineWidth: 1))
+    let digits = Array(pin)
+
+    ZStack {
+      HStack(spacing: 8) {
+        ForEach(0..<SealedMessageCrypto.pinLength, id: \.self) { index in
+          let isFilled = index < digits.count
+          // Callers attach their own focus binding, so highlight the next slot rather than tracking focus here.
+          let isCursor = index == digits.count
+
+          Text(isFilled ? String(digits[index]) : "")
+            .font(CSTheme.mono(24, .semibold))
+            .foregroundStyle(CSTheme.ink)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(Color.white.opacity(isFilled ? 0.09 : 0.055), in: CSTheme.card(CSTheme.smallCornerRadius + 2))
+            .overlay(
+              CSTheme.card(CSTheme.smallCornerRadius + 2)
+                .strokeBorder(isCursor ? CSTheme.accent.opacity(0.85) : CSTheme.stroke, lineWidth: isCursor ? 1.5 : 1)
+            )
+            .overlay {
+              if !isFilled && !isCursor {
+                Circle()
+                  .fill(Color.white.opacity(0.16))
+                  .frame(width: 6, height: 6)
+              }
+            }
+            .scaleEffect(isFilled ? 1 : 0.98)
+            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: isFilled)
+            .animation(.easeOut(duration: 0.15), value: isCursor)
+        }
+      }
+      .accessibilityHidden(true)
+
+      // The real input: invisible, but sized over the cells so any tap focuses it.
+      TextField(placeholder, text: $pin)
+        .keyboardType(.numberPad)
+        .textContentType(.oneTimeCode)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .foregroundStyle(.clear)
+        .tint(.clear)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .opacity(0.02)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue("\(digits.count) of \(SealedMessageCrypto.pinLength) digits entered")
+    }
+    .privacySensitive()
     .onAppear {
       pin = SealedMessageCrypto.normalizePIN(pin)
     }
@@ -2060,17 +2226,42 @@ private struct PinEntryField: View {
   }
 }
 
+/// Decodes attachment data lazily, once. Views are re-initialised on every
+/// parent render, so decoding in init/body repeatedly re-inflated the JPEG.
+private final class DecodedImageBox {
+  private var data: Data?
+  private var decoded: UIImage?
+
+  init(data: Data?) {
+    self.data = data
+  }
+
+  var image: UIImage? {
+    if decoded == nil, let data {
+      decoded = UIImage(data: data)
+    }
+    return decoded
+  }
+
+  func clear() {
+    data = nil
+    decoded = nil
+  }
+}
+
 private struct SecureReaderSessionView: View {
   @Environment(\.dismiss) private var dismiss
   @ObservedObject var store: SealedMessageStore
   @AppStorage(interactionStatusSharingOptInKey) private var sharesInteractionStatus = false
   @State private var openedMessage: OpenedSealedMessage
   @State private var showsImage: Bool
+  @State private var attachmentImage: DecodedImageBox
 
   init(openedMessage: OpenedSealedMessage, store: SealedMessageStore) {
     self.store = store
     _openedMessage = State(initialValue: openedMessage)
     _showsImage = State(initialValue: openedMessage.attachment != nil)
+    _attachmentImage = State(initialValue: DecodedImageBox(data: openedMessage.attachment?.data))
   }
 
   var body: some View {
@@ -2078,7 +2269,7 @@ private struct SecureReaderSessionView: View {
       handleScreenshotDetected()
     }) {
       ZStack(alignment: .bottom) {
-        if showsImage, let attachment = openedMessage.attachment, let image = UIImage(data: attachment.data) {
+        if showsImage, openedMessage.attachment != nil, let image = attachmentImage.image {
           AttachmentImageReaderView(
             image: image,
             showsImage: $showsImage,
@@ -2094,9 +2285,6 @@ private struct SecureReaderSessionView: View {
           if openedMessage.attachment != nil {
             ReaderModeSwitch(showsImage: $showsImage)
               .frame(maxWidth: .infinity)
-              .padding(4)
-              .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-              .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
               .padding(.horizontal, 20)
               .padding(.bottom, 18)
           }
@@ -2127,6 +2315,7 @@ private struct SecureReaderSessionView: View {
   }
 
   private func clear() {
+    attachmentImage.clear()
     openedMessage = OpenedSealedMessage(plaintext: "", attachment: nil, retained: false, eventPath: nil)
   }
 }
@@ -2138,18 +2327,20 @@ private struct SenderPreviewSessionView: View {
   let imageData: Data?
   let link: URL
   @State private var showsImage: Bool
+  @State private var decodedImage: DecodedImageBox
 
   init(message: String, imageData: Data?, link: URL) {
     self.message = message
     self.imageData = imageData
     self.link = link
     _showsImage = State(initialValue: imageData != nil)
+    _decodedImage = State(initialValue: DecodedImageBox(data: imageData))
   }
 
   var body: some View {
     CaptureShield {
       ZStack(alignment: .bottom) {
-        if showsImage, let imageData, let image = UIImage(data: imageData) {
+        if showsImage, let image = decodedImage.image {
           AttachmentImageReaderView(
             image: image,
             showsImage: $showsImage,
@@ -2176,9 +2367,6 @@ private struct SenderPreviewSessionView: View {
             if imageData != nil {
               ReaderModeSwitch(showsImage: $showsImage)
                 .frame(maxWidth: .infinity)
-                .padding(4)
-                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
                 .padding(.horizontal, 20)
             }
 
@@ -2204,17 +2392,16 @@ private struct ReaderModeSwitch: View {
   @Binding var showsImage: Bool
 
   var body: some View {
-    Picker("Reader mode", selection: $showsImage) {
-      Label("Text", systemImage: "text.alignleft")
-        .tag(false)
-      Label("Image", systemImage: "photo.fill")
-        .tag(true)
-    }
-    .pickerStyle(.segmented)
-    .tint(Color(red: 0.48, green: 1.0, blue: 0.70))
-    .onChange(of: showsImage) { _, _ in
-      softHaptic()
-    }
+    PillSegmentedControl(
+      selection: $showsImage,
+      options: [
+        .init(value: false, title: "Text", systemImage: "text.alignleft"),
+        .init(value: true, title: "Image", systemImage: "photo.fill")
+      ],
+      height: 34,
+      fontSize: 14
+    )
+    .accessibilityLabel("Reader mode")
   }
 }
 
@@ -2250,7 +2437,7 @@ private struct AttachmentImageReaderView: View {
     onImageInteractionPerformed: @escaping () -> Void = {}
   ) {
     self.image = image
-    self.pixelatedImage = image.pixelatedForPrivacy()
+    self.pixelatedImage = UIImage.cachedPixelatedForPrivacy(image)
     _showsImage = showsImage
     self.onClose = onClose
     self.showsModeSwitch = showsModeSwitch
@@ -2284,7 +2471,7 @@ private struct AttachmentImageReaderView: View {
       let fittedImageSize = image.size.scaledToFit(in: imageViewport)
 
       ZStack(alignment: .bottom) {
-        Color(red: 0.045, green: 0.047, blue: 0.043)
+        CSTheme.background
           .ignoresSafeArea()
 
         ZStack {
@@ -2389,9 +2576,6 @@ private struct AttachmentImageReaderView: View {
             if showsModeSwitch {
               ReaderModeSwitch(showsImage: $showsImage)
                 .frame(maxWidth: .infinity)
-                .padding(4)
-                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
           }
           .padding(.horizontal, 20)
@@ -2522,14 +2706,14 @@ private struct ActiveRevealWindowOverlay: View {
     GeometryReader { _ in
       ZStack {
         RoundedRectangle(cornerRadius: 10)
-          .stroke(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.34), lineWidth: 1)
+          .stroke(CSTheme.accent.opacity(0.34), lineWidth: 1)
           .frame(width: revealZone.width - 28, height: revealZone.height)
           .position(x: revealZone.midX, y: revealZone.midY)
 
         Capsule()
-          .fill(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.76))
+          .fill(CSTheme.accent.opacity(0.76))
           .frame(width: revealZone.width - 54, height: 2)
-          .shadow(color: Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.54), radius: 10)
+          .shadow(color: CSTheme.accent.opacity(0.54), radius: 10)
           .position(
             x: revealZone.midX,
             y: revealZone.minY + 18 + (revealZone.height - 36) * scanProgress
@@ -2551,10 +2735,10 @@ private struct ImageMoveTeachingPill: View {
   var body: some View {
     Image(systemName: "arrow.up.left.and.arrow.down.right")
       .font(.system(size: 18, weight: .semibold))
-      .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70))
+      .foregroundStyle(CSTheme.accent)
       .frame(width: 54, height: 54)
       .background(Color.white.opacity(0.08), in: Circle())
-      .overlay(Circle().stroke(Color(red: 0.48, green: 1.0, blue: 0.70).opacity(0.42), lineWidth: 1))
+      .overlay(Circle().stroke(CSTheme.accent.opacity(0.42), lineWidth: 1))
       .offset(x: moves ? 10 : -10, y: moves ? 8 : -8)
       .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: moves)
       .onAppear {
@@ -2582,6 +2766,7 @@ private struct OnboardingView: View {
   @State private var didMoveImage = false
   @State private var showsOnboardingImage = true
   @State private var senderPreviewSession: SenderPreviewSession?
+  @State private var onboardingDemoImage = demoCardImage()
 
   private var canAdvanceFromReader: Bool {
     didRevealMessage && didScrollMessage
@@ -2593,7 +2778,7 @@ private struct OnboardingView: View {
 
   var body: some View {
     ZStack(alignment: .bottom) {
-      Color(red: 0.045, green: 0.047, blue: 0.043)
+      CSTheme.background
         .ignoresSafeArea()
 
       switch step {
@@ -2627,7 +2812,7 @@ private struct OnboardingView: View {
         }
       case .imageReader:
         AttachmentImageReaderView(
-          image: demoCardImage(),
+          image: onboardingDemoImage,
           showsImage: $showsOnboardingImage,
           onClose: nil,
           showsModeSwitch: false,
@@ -2666,7 +2851,7 @@ private struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 4) {
               Text("And this is how you create a message.")
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+                .foregroundStyle(CSTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
 
               Text("Add the note, choose a six-digit PIN, then seal it before sharing.")
@@ -2715,7 +2900,7 @@ private struct SectionTitle: View {
   var body: some View {
     Label(title, systemImage: systemImage)
       .font(.system(size: 18, weight: .semibold, design: .rounded))
-      .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
+      .foregroundStyle(CSTheme.ink)
   }
 }
 
@@ -2738,7 +2923,7 @@ private struct FieldHeader: View {
           Text("Clear")
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .textCase(.uppercase)
-            .foregroundStyle(Color(red: 0.48, green: 1.0, blue: 0.70))
+            .foregroundStyle(CSTheme.accent)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Clear \(title)")
@@ -2806,34 +2991,41 @@ private struct PrimaryActionButtonStyle: ButtonStyle {
   @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
+    let shape = CSTheme.card()
+
     configuration.label
-      .font(.system(size: 15, weight: .semibold, design: .rounded))
-      .foregroundStyle(isEnabled ? Color(red: 0.035, green: 0.045, blue: 0.04) : Color.white.opacity(0.34))
-      .padding(.vertical, 13)
-      .background(
-        RoundedRectangle(cornerRadius: 8)
-          .fill(primaryFill(isPressed: configuration.isPressed))
-      )
-      .opacity(isEnabled ? 1 : 0.72)
-  }
-
-  private func primaryFill(isPressed: Bool) -> Color {
-    guard isEnabled else {
-      return Color.white.opacity(0.10)
-    }
-
-    return isPressed ? Color(red: 0.68, green: 0.86, blue: 0.78) : Color(red: 0.78, green: 0.96, blue: 0.86)
+      .font(CSTheme.rounded(16, .bold))
+      .foregroundStyle(isEnabled ? CSTheme.accentInk : Color.white.opacity(0.34))
+      .padding(.vertical, 15)
+      .background {
+        if isEnabled {
+          shape
+            .fill(LinearGradient(colors: [CSTheme.accent, CSTheme.accentDeep], startPoint: .top, endPoint: .bottom))
+            .overlay(shape.strokeBorder(Color.white.opacity(0.35), lineWidth: 1).blendMode(.overlay))
+            .shadow(color: CSTheme.accent.opacity(configuration.isPressed ? 0.12 : 0.28), radius: configuration.isPressed ? 6 : 14, y: 5)
+        } else {
+          shape.fill(Color.white.opacity(0.08))
+            .overlay(shape.strokeBorder(CSTheme.stroke, lineWidth: 1))
+        }
+      }
+      .scaleEffect(configuration.isPressed ? 0.97 : 1)
+      .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+      .animation(.easeOut(duration: 0.2), value: isEnabled)
   }
 }
 
 private struct SecondaryActionButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
+    let shape = CSTheme.card(CSTheme.smallCornerRadius + 2)
+
     configuration.label
-      .font(.system(size: 14, weight: .semibold, design: .rounded))
-      .foregroundStyle(Color(red: 0.965, green: 0.965, blue: 0.92))
-      .padding(.vertical, 11)
-      .background(Color.white.opacity(configuration.isPressed ? 0.12 : 0.075), in: RoundedRectangle(cornerRadius: 8))
-      .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.11), lineWidth: 1))
+      .font(CSTheme.rounded(14, .semibold))
+      .foregroundStyle(CSTheme.ink)
+      .padding(.vertical, 12)
+      .background(Color.white.opacity(configuration.isPressed ? 0.13 : 0.075), in: shape)
+      .overlay(shape.strokeBorder(Color.white.opacity(0.11), lineWidth: 1))
+      .scaleEffect(configuration.isPressed ? 0.97 : 1)
+      .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
   }
 }
 
@@ -2856,7 +3048,21 @@ private extension CGSize {
   }
 }
 
+private let pixelatedImageCache = NSCache<UIImage, UIImage>()
+
 private extension UIImage {
+  /// AttachmentImageReaderView is re-initialised on every parent render; this
+  /// keeps the redraw + pixel shuffle to once per source image.
+  static func cachedPixelatedForPrivacy(_ image: UIImage) -> UIImage {
+    if let cached = pixelatedImageCache.object(forKey: image) {
+      return cached
+    }
+
+    let pixelated = image.pixelatedForPrivacy()
+    pixelatedImageCache.setObject(pixelated, forKey: image)
+    return pixelated
+  }
+
   func pixelatedForPrivacy() -> UIImage {
     guard size.width > 0, size.height > 0 else {
       return self
@@ -2984,53 +3190,12 @@ private struct PrivacyPixelShuffleGenerator {
   }
 }
 
-private func normalizeImageAttachment(_ data: Data) throws -> (data: Data, preview: UIImage) {
-  guard let sourceImage = UIImage(data: data) else {
-    throw SealedMessageError.invalidAttachment
-  }
-
-  let maxDimension: CGFloat = 2400
-  let sourceSize = sourceImage.size
-  guard sourceSize.width > 0 && sourceSize.height > 0 else {
-    throw SealedMessageError.invalidAttachment
-  }
-
-  let scale = min(1, maxDimension / max(sourceSize.width, sourceSize.height))
-  let targetSize = CGSize(
-    width: max(1, floor(sourceSize.width * scale)),
-    height: max(1, floor(sourceSize.height * scale))
-  )
-  let rendererFormat = UIGraphicsImageRendererFormat()
-  rendererFormat.scale = 1
-  rendererFormat.opaque = true
-  let renderer = UIGraphicsImageRenderer(size: targetSize, format: rendererFormat)
-  let normalizedImage = renderer.image { context in
-    UIColor(red: 0.045, green: 0.047, blue: 0.043, alpha: 1).setFill()
-    context.fill(CGRect(origin: .zero, size: targetSize))
-    sourceImage.draw(in: CGRect(origin: .zero, size: targetSize))
-  }
-
-  let qualitySteps: [CGFloat] = [0.86, 0.74, 0.62]
-  for quality in qualitySteps {
-    guard let encoded = normalizedImage.jpegData(compressionQuality: quality) else {
-      continue
-    }
-
-    if encoded.count <= SealedMessageCrypto.maxImageAttachmentByteCount {
-      return (encoded, normalizedImage)
-    }
-  }
-
-  throw SealedMessageError.invalidAttachment
-}
-
+@MainActor
 private func softHaptic() {
-  let generator = UIImpactFeedbackGenerator(style: .soft)
-  generator.prepare()
-  generator.impactOccurred(intensity: 0.35)
+  CSHaptics.tap(0.35)
 }
 
+@MainActor
 private func warningHaptic() {
-  let generator = UINotificationFeedbackGenerator()
-  generator.notificationOccurred(.warning)
+  CSHaptics.warning()
 }
