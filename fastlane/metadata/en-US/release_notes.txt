@@ -1,1 +1,8 @@
-Initial App Store release candidate with one-time encrypted notes, App Clip opening, local encryption, PIN-based access, guarded reading, and screenshot-triggered reader destruction.
+You can now let recipients read your sealed messages in a web browser, with no app download required.
+
+- Choose app and web reading, or keep a message app-only.
+- Improved message links for opening the iOS app or App Clip.
+- Sent Messages now updates when a message is opened on the web.
+- Fixed the empty Sent Messages layout.
+
+Sending text-only messages and reading received messages remain free. Sending image attachments requires Pro.

@@ -1,1 +1,1 @@
-Send encrypted notes that can be opened once, protected by a separate PIN and a guarded reading view.
+Send once. Read once. Let recipients open your encrypted message in a browser with the link and PIN, or choose app-only reading.
