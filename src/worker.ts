@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-Y0TJ6Tff4I8HDDAYTNYsNQ703l2AkKunPm8mT91EV3g='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-g19x3rFJygxW143FkITXSRo6ty/+sTTRhj9Uxuz5RvE='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -2670,9 +2670,12 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         content: "";
         position: absolute;
         inset: 0;
+        /* Phosphor pixel matrix: 4px cells with a dark scan gap and faint green cell borders. */
         background:
-          repeating-linear-gradient(180deg, oklch(0% 0 0 / 0.22) 0 1px, transparent 1px 3px),
-          repeating-linear-gradient(90deg, oklch(70% 0.2 25 / 0.03) 0 1px, oklch(81% 0.21 152 / 0.03) 1px 2px, oklch(70% 0.16 250 / 0.03) 2px 3px);
+          repeating-linear-gradient(180deg, oklch(0% 0 0 / 0.26) 0 1px, transparent 1px 4px),
+          repeating-linear-gradient(180deg, transparent 0 1px, oklch(81% 0.21 152 / 0.075) 1px 2px, transparent 2px 4px),
+          repeating-linear-gradient(90deg, oklch(81% 0.21 152 / 0.07) 0 1px, transparent 1px 4px),
+          radial-gradient(circle at 2.5px 2.5px, oklch(81% 0.21 152 / 0.045) 0 1px, transparent 1.5px) 0 0 / 4px 4px;
       }
       .crt::after {
         content: "";
@@ -2699,12 +2702,14 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         position: fixed;
         left: 0;
         top: 0;
-        width: 228px;
+        width: 300px;
         height: 228px;
-        border-radius: 50%;
         pointer-events: none;
         z-index: 61;
         will-change: transform;
+        /* Feather the box so resampling from rotation/stretch never shows a rectangular edge. */
+        -webkit-mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
+        mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
       }
 
       /* Cipher animation */
@@ -3442,9 +3447,10 @@ function cipherScript(): string {
 </script>`;
 }
 
-// Melted glass: an invisible region under the cursor that pinches the page inward (zoom out)
-// with a slight RGB split, via an SVG displacement backdrop filter. It sits above the CRT layer
-// so the scanlines bend too. Chromium desktop only; other browsers keep the static CRT look.
+// Melted glass: the cursor is a finger dragged through soft glass. A height field (dent under the
+// cursor, ridge piled up ahead, tapered trough behind) is turned into an SVG displacement backdrop
+// filter, rotated to the direction of motion. Full strength while moving, easing to 10% at rest.
+// Chromium desktop only; other browsers keep the static CRT look.
 function meltedGlassScript(): string {
   return `<script>
 (() => {
@@ -3454,29 +3460,53 @@ function meltedGlassScript(): string {
   const brands = navigator.userAgentData && navigator.userAgentData.brands;
   if (!brands || !brands.some(b => /Chrom/.test(b.brand))) return;
 
-  const SIZE = 228;
-  const RES = 256;
+  const LENGTH = 300;
+  const WIDTH = 228;
+  const FINGER = 0.18;
+  const MU = 200;
+  const MV = 152;
   const mapCanvas = document.createElement("canvas");
-  mapCanvas.width = mapCanvas.height = RES;
+  mapCanvas.width = MU;
+  mapCanvas.height = MV;
   const ctx = mapCanvas.getContext("2d");
   if (!ctx) return;
 
-  // Displacement d(r) = r * (1 - r^2)^2, normalised: zero at the centre and the rim, with zero
-  // slope at the rim so there is no visible edge. Sampling outward makes the content shrink inward.
-  const image = ctx.createImageData(RES, RES);
-  const half = RES / 2;
-  for (let y = 0; y < RES; y++) {
-    for (let x = 0; x < RES; x++) {
-      const ox = (x + 0.5) / half - 1;
-      const oy = (y + 0.5) / half - 1;
-      const r2 = ox * ox + oy * oy;
-      const falloff = r2 < 1 ? (1 - r2) * (1 - r2) / 0.286 * 0.9 : 0;
-      const o = (y * RES + x) * 4;
-      image.data[o] = 128 + ox * falloff * 127;
-      image.data[o + 1] = 128 + oy * falloff * 127;
-      image.data[o + 2] = 128;
-      image.data[o + 3] = 255;
+  // Surface height in local space: u runs along the direction of motion, v across it, both -1..1.
+  const surface = (u, v) => {
+    const r2 = u * u + v * v;
+    if (r2 >= 1) return 0;
+    const du = u - FINGER;
+    const dent = -Math.exp(-(du * du / 0.06 + v * v / 0.05));
+    const rho = Math.sqrt(du * du + v * v);
+    const ahead = Math.max(0, du / (rho + 0.0001));
+    const ridge = 0.42 * Math.exp(-((rho - 0.36) * (rho - 0.36)) / 0.014) * ahead * ahead;
+    const tu = du + 0.38;
+    const tailWidth = 0.045 * Math.min(Math.max(1 + du * 1.3, 0.18), 1.6);
+    const tail = -0.4 * Math.exp(-(tu * tu / 0.11 + v * v / tailWidth));
+    return (dent + ridge + tail) * Math.pow(1 - r2, 3);
+  };
+
+  const gu = new Float32Array(MU * MV);
+  const gv = new Float32Array(MU * MV);
+  const eps = 0.01;
+  let peak = 0;
+  for (let y = 0; y < MV; y++) {
+    for (let x = 0; x < MU; x++) {
+      const u = (x + 0.5) / MU * 2 - 1;
+      const v = (y + 0.5) / MV * 2 - 1;
+      const i = y * MU + x;
+      gu[i] = (surface(u + eps, v) - surface(u - eps, v)) / (2 * eps);
+      gv[i] = (surface(u, v + eps) - surface(u, v - eps)) / (2 * eps);
+      peak = Math.max(peak, Math.abs(gu[i]), Math.abs(gv[i]));
     }
+  }
+  // Sampling along +gradient: the dent pinches inward (zoom out), the ridge magnifies slightly.
+  const image = ctx.createImageData(MU, MV);
+  for (let i = 0; i < MU * MV; i++) {
+    image.data[i * 4] = 128 + gu[i] / peak * 127;
+    image.data[i * 4 + 1] = 128 + gv[i] / peak * 127;
+    image.data[i * 4 + 2] = 128;
+    image.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
 
@@ -3487,7 +3517,7 @@ function meltedGlassScript(): string {
   svg.setAttribute("aria-hidden", "true");
   svg.style.position = "absolute";
   const filter = document.createElementNS(NS, "filter");
-  const attrs = { id: "melted-glass", x: "0", y: "0", width: String(SIZE), height: String(SIZE), filterUnits: "userSpaceOnUse", primitiveUnits: "userSpaceOnUse", "color-interpolation-filters": "sRGB" };
+  const attrs = { id: "melted-glass", x: "0", y: "0", width: String(LENGTH), height: String(WIDTH), filterUnits: "userSpaceOnUse", primitiveUnits: "userSpaceOnUse", "color-interpolation-filters": "sRGB" };
   for (const key in attrs) filter.setAttribute(key, attrs[key]);
   const add = (tag, values) => {
     const node = document.createElementNS(NS, tag);
@@ -3495,7 +3525,7 @@ function meltedGlassScript(): string {
     filter.appendChild(node);
     return node;
   };
-  add("feImage", { href: mapCanvas.toDataURL(), x: "0", y: "0", width: String(SIZE), height: String(SIZE), preserveAspectRatio: "none", result: "map" });
+  add("feImage", { href: mapCanvas.toDataURL(), x: "0", y: "0", width: String(LENGTH), height: String(WIDTH), preserveAspectRatio: "none", result: "map" });
   const maps = [];
   const channels = [["r", "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"], ["g", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"], ["b", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"]];
   for (const [name, matrix] of channels) {
@@ -3513,29 +3543,43 @@ function meltedGlassScript(): string {
   glass.style.backdropFilter = "url(#melted-glass)";
   document.body.appendChild(glass);
 
-  const pointer = { x: 0, y: 0, inside: false };
-  const state = { x: 0, y: 0, vx: 0, vy: 0, strength: 0, drag: 0 };
+  const pointer = { x: 0, y: 0, inside: false, lastMove: 0, vx: 0, vy: 0 };
+  const state = { x: 0, y: 0, angle: 0, speed: 0, strength: 0 };
   let running = false;
 
-  const frame = () => {
-    // Heavy, viscous follow: slow acceleration and strong damping, no bounce.
-    state.vx = (state.vx + (pointer.x - state.x) * 0.045) * 0.8;
-    state.vy = (state.vy + (pointer.y - state.y) * 0.045) * 0.8;
-    state.x += state.vx;
-    state.y += state.vy;
-    const speed = Math.min(Math.hypot(state.vx, state.vy), 40);
-    state.drag += (speed - state.drag) * 0.08;
-    state.strength += ((pointer.inside ? 1 : 0) - state.strength) * 0.06;
+  const frame = now => {
+    const moving = pointer.inside && now - pointer.lastMove < 70;
+    if (!moving) {
+      pointer.vx *= 0.85;
+      pointer.vy *= 0.85;
+    }
+    // Strength: quick press while moving, ease-out release to 10% at rest, 0 when outside.
+    const target = !pointer.inside ? 0 : moving ? 1 : 0.1;
+    state.strength += (target - state.strength) * (target > state.strength ? 0.22 : 0.05);
 
-    const smear = Math.min(state.drag / 40, 0.45);
-    const angle = Math.atan2(state.vy, state.vx);
-    glass.style.transform = "translate(" + (state.x - SIZE / 2) + "px," + (state.y - SIZE / 2) + "px) rotate(" + angle + "rad) scale(" + (1 + smear) + "," + (1 - smear * 0.35) + ") rotate(" + (-angle) + "rad)";
-    const amount = (24.5 + state.drag * 0.665) * state.strength;
+    state.x += (pointer.x - state.x) * 0.35;
+    state.y += (pointer.y - state.y) * 0.35;
+    const velocity = Math.hypot(pointer.vx, pointer.vy);
+    state.speed += (Math.min(velocity, 40) - state.speed) * 0.15;
+    if (velocity > 0.6) {
+      const wanted = Math.atan2(pointer.vy, pointer.vx);
+      let delta = wanted - state.angle;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      state.angle += delta * 0.18;
+    }
+
+    const stretch = 1 + Math.min(state.speed / 40, 1) * 0.35;
+    const reach = FINGER * LENGTH / 2 * stretch;
+    const cx = state.x - Math.cos(state.angle) * reach;
+    const cy = state.y - Math.sin(state.angle) * reach;
+    glass.style.transform = "translate(" + (cx - LENGTH / 2) + "px," + (cy - WIDTH / 2) + "px) rotate(" + state.angle + "rad) scale(" + stretch + "," + (1 - (stretch - 1) * 0.25) + ")";
+    const amount = (26 + state.speed * 0.3) * state.strength;
     maps[0].setAttribute("scale", String(amount * 1.05));
     maps[1].setAttribute("scale", String(amount));
     maps[2].setAttribute("scale", String(amount * 0.95));
 
-    const settled = Math.abs(pointer.x - state.x) < 0.3 && Math.abs(pointer.y - state.y) < 0.3 && speed < 0.05 && Math.abs((pointer.inside ? 1 : 0) - state.strength) < 0.003;
+    const settled = !moving && Math.abs(target - state.strength) < 0.002 && Math.abs(pointer.x - state.x) < 0.3 && Math.abs(pointer.y - state.y) < 0.3 && state.speed < 0.05;
     if (settled) {
       running = false;
       return;
@@ -3551,13 +3595,20 @@ function meltedGlassScript(): string {
 
   window.addEventListener("pointermove", event => {
     if (event.pointerType && event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    const x = event.clientX;
+    const y = event.clientY;
     if (!pointer.inside && state.strength < 0.01) {
-      state.x = event.clientX;
-      state.y = event.clientY;
+      state.x = x;
+      state.y = y;
+      pointer.x = x;
+      pointer.y = y;
     }
-    pointer.x = event.clientX;
-    pointer.y = event.clientY;
+    pointer.vx = pointer.vx * 0.6 + (x - pointer.x) * 0.4;
+    pointer.vy = pointer.vy * 0.6 + (y - pointer.y) * 0.4;
+    pointer.x = x;
+    pointer.y = y;
     pointer.inside = true;
+    pointer.lastMove = performance.now();
     wake();
   }, { passive: true });
 
