@@ -1,6 +1,6 @@
 app_identifier("com.domenico.privacyscreen")
 app(6779173642)
-app_version("1.0.2")
+app_version("1.0.3")
 metadata_path("fastlane/metadata")
 screenshots_path("fastlane/screenshots")
 skip_screenshots(true)
