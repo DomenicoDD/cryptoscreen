@@ -40,6 +40,9 @@
 		0B0010010000000000000007 /* ProImageEntitlementStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000016 /* ProImageEntitlementStore.swift */; };
 		0B0010010000000000000008 /* CryptoscreenReviewPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0020010000000000000018 /* CryptoscreenReviewPrompt.swift */; };
 		0A001001000000000000000E /* CryptoscreenTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001B /* CryptoscreenTheme.swift */; };
+		0A0010010000000000000020 /* CryptoscreenLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001D /* CryptoscreenLogo.swift */; };
+		0A0010020000000000000020 /* CryptoscreenLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001D /* CryptoscreenLogo.swift */; };
+		0A0010010000000000000021 /* AlphaLyrae-Medium.otf in Resources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001E /* AlphaLyrae-Medium.otf */; };
 		0A001002000000000000000F /* CryptoscreenTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001B /* CryptoscreenTheme.swift */; };
 		0B0010010000000000000009 /* CryptoscreenTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001B /* CryptoscreenTheme.swift */; };
 		0A001001000000000000000F /* ImageAttachmentPreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A002001000000000000001C /* ImageAttachmentPreparer.swift */; };
@@ -91,6 +94,8 @@
 		0B0020010000000000000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		0B0020010000000000000006 /* PrivacyScreenMessagesExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PrivacyScreenMessagesExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A002001000000000000001B /* CryptoscreenTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoscreenTheme.swift; sourceTree = "<group>"; };
+		0A002001000000000000001D /* CryptoscreenLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoscreenLogo.swift; sourceTree = "<group>"; };
+		0A002001000000000000001E /* AlphaLyrae-Medium.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "AlphaLyrae-Medium.otf"; sourceTree = "<group>"; };
 		0A002001000000000000001C /* ImageAttachmentPreparer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAttachmentPreparer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -145,6 +150,8 @@
 				0A0020010000000000000008 /* CaptureShield.swift */,
 				0A0020010000000000000009 /* SealedMessageRootView.swift */,
 				0A002001000000000000001B /* CryptoscreenTheme.swift */,
+				0A002001000000000000001D /* CryptoscreenLogo.swift */,
+				0A002001000000000000001E /* AlphaLyrae-Medium.otf */,
 				0A002001000000000000001C /* ImageAttachmentPreparer.swift */,
 				0A0020010000000000000019 /* ReaderInteractionPrototypeView.swift */,
 				0A0020010000000000000005 /* Assets.xcassets */,
@@ -288,6 +295,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0A0010010000000000000005 /* Assets.xcassets in Resources */,
+				0A0010010000000000000021 /* AlphaLyrae-Medium.otf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -348,6 +356,7 @@
 				0A0010010000000000000008 /* SealedMessageRootView.swift in Sources */,
 				0A001001000000000000000C /* ReaderInteractionPrototypeView.swift in Sources */,
 				0A001001000000000000000E /* CryptoscreenTheme.swift in Sources */,
+				0A0010010000000000000020 /* CryptoscreenLogo.swift in Sources */,
 				0A001001000000000000000F /* ImageAttachmentPreparer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -368,6 +377,7 @@
 				0A001002000000000000000C /* ProImageEntitlementStore.swift in Sources */,
 				0A001002000000000000000D /* CryptoscreenReviewPrompt.swift in Sources */,
 				0A001002000000000000000F /* CryptoscreenTheme.swift in Sources */,
+				0A0010020000000000000020 /* CryptoscreenLogo.swift in Sources */,
 				0A0010020000000000000010 /* ImageAttachmentPreparer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

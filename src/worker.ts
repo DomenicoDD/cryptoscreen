@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-9izAy4IeG8W9J056SCwghbURku2R78p9Y0UrXYcEHD4='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-9izAy4IeG8W9J056SCwghbURku2R78p9Y0UrXYcEHD4=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -2511,6 +2511,29 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         0%, 100% { box-shadow: 0 0 0 3px var(--accent-dim), 0 0 10px oklch(81% 0.21 152 / 0.6); }
         50% { box-shadow: 0 0 0 6px oklch(81% 0.21 152 / 0.05), 0 0 20px var(--accent); }
       }
+
+      /* Header logo: the app's launch sequence in miniature. Pixels decrypt, the feather writes in,
+         and the reveal scan line sweeps the icon until the page has loaded. */
+      .brand-logo { flex: none; width: 28px; height: 28px; overflow: visible; filter: drop-shadow(0 0 10px oklch(81% 0.21 152 / 0.16)); }
+      .brand-logo .bl-tile { transform-box: fill-box; transform-origin: center; animation: bl-tile 640ms var(--ease-out) 520ms both; }
+      .brand-logo .bl-cells rect { transform-box: fill-box; transform-origin: center; fill: var(--c); opacity: var(--o); animation: bl-cell 300ms var(--ease-out) var(--d) both; }
+      .brand-logo .bl-cells rect.b { animation: bl-fade 420ms ease-out var(--d) both; }
+      .brand-logo .bl-feather { transform-box: fill-box; transform-origin: 20% 90%; animation: bl-drop 650ms var(--ease-out) 1150ms both; }
+      .brand-logo .bl-reveal { transform-box: fill-box; transform-origin: top; animation: bl-reveal 560ms cubic-bezier(0.33, 1, 0.68, 1) 1150ms both; }
+      .brand-logo .bl-scan-wrap { opacity: 1; transition: opacity 220ms ease-out; }
+      html.cs-loaded .brand-logo .bl-scan-wrap { opacity: 0; }
+      .brand-logo .bl-scan { opacity: 0; animation: bl-scan-in 240ms ease-out 1700ms both, bl-scan-move 1050ms ease-in-out 1700ms infinite alternate both; }
+      @keyframes bl-tile { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+      @keyframes bl-cell {
+        0% { opacity: 0; transform: scale(0.4); fill: #d9ffe9; }
+        60% { opacity: 1; transform: scale(1.12); fill: #d9ffe9; }
+        100% { opacity: var(--o); transform: scale(1); fill: var(--c); }
+      }
+      @keyframes bl-fade { from { opacity: 0; } to { opacity: var(--o); } }
+      @keyframes bl-drop { from { opacity: 0; transform: translate(140px, -170px) rotate(-14deg); } to { opacity: 1; transform: none; } }
+      @keyframes bl-reveal { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+      @keyframes bl-scan-in { from { opacity: 0; } to { opacity: 0.85; } }
+      @keyframes bl-scan-move { from { transform: translateY(150px); } to { transform: translateY(835px); } }
       header nav {
         display: flex;
         flex-wrap: wrap;
@@ -3201,7 +3224,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
   <body>
     <div class="wrap">
       <header>
-        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span>cryptoscreen</a>
+        <a class="brand" href="/">${BRAND_LOGO_SVG}cryptoscreen</a>
         <nav aria-label="Main">
           <a href="/privacy">Privacy</a>
           <a href="/security">Security</a>
@@ -3230,6 +3253,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     ${bodyScript}
     ${cipherScript()}
     ${meltedGlassScript()}
+    ${BRAND_LOGO_LOADED_SCRIPT}
     <div class="crt-grid" aria-hidden="true"></div>
     <div class="crt" aria-hidden="true"></div>
   </body>
@@ -3306,6 +3330,89 @@ function homeStatsScript(): string {
 
 // Decorative "decrypt" reveal: headings and labels resolve from shuffled glyphs.
 // Static string so its CSP hash stays stable; it bails out without the browser APIs it needs.
+// The cryptoscreen logo (pixel lock + feather) from the Figma splash icon, in a 999-unit square.
+// Cells carry their colour, final opacity and animation delay so the intro runs in pure CSS:
+// it starts with first paint and still ends on the finished logo without JavaScript or with
+// reduced motion. Mirrors CSLogo in the app's CryptoscreenLogo.swift.
+const BRAND_LOGO_SVG = (() => {
+  const green = "#5fbd86", light = "#64b686", dark = "#2f8954", deep = "#0d4725";
+  type Cell = [number, number, string, number];
+  const lock: Cell[] = [
+    [254, 460, light, 1], [295, 460, green, 1], [336, 460, green, 1], [377, 460, green, 1], [418, 460, green, 1], [459, 460, green, 1],
+    [254, 501, light, 1], [295, 501, green, 1], [336, 501, green, 1], [377, 501, green, 1], [418, 501, green, 1], [459, 501, green, 1],
+    [254, 542, green, 1], [295, 542, green, 1], [336, 542, green, 1], [377, 542, green, 1], [418, 542, green, 1], [459, 542, green, 1],
+    [254, 583, green, 1], [295, 583, green, 1], [254, 623, green, 1], [295, 623, green, 1], [254, 664, green, 1], [295, 664, green, 1],
+    [254, 705, green, 1], [582, 583, green, 0.33], [664, 623, green, 0.25], [459, 664, green, 0.7], [295, 746, green, 0.32],
+    [541, 746, green, 0.12], [664, 746, green, 0.1],
+    [418, 173, light, 1], [459, 173, green, 1], [459, 214, dark, 1], [500, 173, green, 1], [500, 214, dark, 1], [541, 173, green, 1],
+    [295, 419, green, 1], [295, 378, green, 1], [295, 337, green, 1], [295, 296, light, 1], [336, 255, light, 1], [377, 214, light, 1],
+    [336, 419, dark, 1], [336, 378, dark, 1], [336, 337, dark, 1], [377, 255, dark, 1], [336, 296, dark, 1], [418, 214, dark, 1],
+    [541, 214, green, 1], [584, 214, green, 1]
+  ];
+  // Drawn above the feather, as in the logo.
+  const bottomRow: Cell[] = [
+    [254, 787, green, 1], [377, 787, deep, 0.8], [295, 787, green, 1], [336, 787, green, 1], [418, 787, green, 0.8], [459, 787, green, 0.8],
+    [500, 787, deep, 0.8], [541, 787, green, 0.8], [582, 787, deep, 0.8], [623, 787, green, 0.8], [664, 787, deep, 0.4], [705, 787, green, 0.4]
+  ];
+  const shackleRight: Cell[] = [
+    [583, 255, green, 1], [624, 255, dark, 1], [623, 296, green, 1], [623, 337, green, 1], [623, 378, green, 1],
+    [623, 419, dark, 1], [664, 296, dark, 1], [664, 337, dark, 1], [664, 378, dark, 1], [664, 419, dark, 1]
+  ];
+  const body: [number, number][] = [
+    [500, 460], [541, 460], [582, 460], [623, 460], [664, 460], [705, 460], [500, 501], [541, 501], [582, 501], [623, 501], [664, 501], [705, 501],
+    [500, 542], [541, 542], [582, 542], [623, 542], [664, 542], [705, 542], [336, 583], [377, 583], [418, 583], [459, 583], [500, 583], [541, 583],
+    [623, 583], [705, 583], [336, 623], [377, 623], [418, 623], [459, 623], [500, 623], [541, 623], [582, 623], [623, 623], [705, 623],
+    [336, 664], [377, 664], [418, 664], [500, 664], [541, 664], [582, 664], [623, 664], [664, 664], [705, 664], [295, 705], [336, 705],
+    [377, 705], [418, 705], [459, 705], [500, 705], [541, 705], [582, 705], [623, 705], [664, 705], [705, 705], [254, 746], [336, 746],
+    [377, 746], [418, 746], [459, 746], [500, 746], [582, 746], [623, 746], [705, 746]
+  ];
+
+  // Decrypt order: top to bottom with a fixed jitter, so every page renders the same markup.
+  let seed = 0xc0ffee;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const delays = new Map<Cell, number>();
+  [...lock, ...bottomRow, ...shackleRight]
+    .map(cell => ({ cell, key: cell[1] + random() * 120 }))
+    .sort((a, b) => a.key - b.key)
+    .forEach(({ cell }, rank) => delays.set(cell, Math.round(220 + rank * 11 + 160 + random() * 180)));
+
+  const rect = (x: number, y: number, colour: string, opacity: number, delay: number, className = "") =>
+    `<rect${className ? ` class="${className}"` : ""} x="${x}" y="${y}" width="36" height="36" rx="2" style="--c:${colour};--o:${opacity};--d:${delay}ms"/>`;
+  const cells = (list: Cell[]) => list.map(cell => rect(cell[0], cell[1], cell[2], cell[3], delays.get(cell) ?? 0)).join("");
+  const bodyCells = body.map(([x, y]) => {
+    const opacity = Math.max(0.06, 0.95 - Math.hypot(x + 18 - 300, y + 18 - 470) / 520);
+    return rect(x, y, green, Number(opacity.toFixed(2)), Math.round(560 + ((x - 254) + (y - 460)) / 900 * 400), "b");
+  }).join("");
+
+  const feather = "M110.416 501.481C101.826 518.037 15.1138 660.776 34.9355 674.851C54.7573 688.925 59.4133 667.17 63.2562 659.584C78.4411 629.606 106.675 569.814 127.869 545.853C146.935 524.299 181.654 499.033 217.158 477.429C204.499 477.318 195.142 480.622 173.851 477.049C224.84 461.99 325.383 402.838 340.213 383.328C331.522 386.638 295.546 387.677 272.269 382.731C286.933 382.183 340.397 362.307 363.374 353.499C377.886 335.238 385.419 320.435 392.75 300.074C386.063 302.724 343.833 316.681 313.233 310.994C329.89 311.141 397.982 280.892 407.82 258.508C442.228 180.225 515.177 81.1608 555.067 37.0224C574.222 15.8268 477.22 30.0845 373.196 100.025C302.029 147.874 242.894 199.333 191.792 279.81C140.691 360.287 143.952 430.888 143.878 439.3C143.804 447.712 143.23 449.133 141.029 444.265C138.827 439.398 134.472 426.649 129.156 399.283C127.443 402.69 121.22 419.639 121.102 433.05C120.985 446.461 123.324 476.605 110.416 501.481Z";
+
+  return `<svg class="brand-logo" viewBox="0 0 999 999" aria-hidden="true" focusable="false">` +
+    `<defs>` +
+    `<radialGradient id="bl-tile" cx="0.42" cy="0.62" r="0.62"><stop offset="0" stop-color="#062b1d"/><stop offset="1" stop-color="#001107"/></radialGradient>` +
+    `<linearGradient id="bl-feather" x1="187.87" y1="265.91" x2="379.01" y2="383.67" gradientUnits="userSpaceOnUse"><stop offset="0.09" stop-color="#eafff3"/><stop offset="0.32" stop-color="#fff"/><stop offset="0.84" stop-color="#d5f7ee"/></linearGradient>` +
+    `<mask id="bl-reveal" maskUnits="userSpaceOnUse" x="0" y="0" width="999" height="999"><g transform="rotate(-38 500 500)"><rect class="bl-reveal" x="-400" y="-800" width="1800" height="2000" fill="#fff"/></g></mask>` +
+    `</defs>` +
+    `<rect class="bl-tile" width="999" height="999" rx="220" fill="url(#bl-tile)" stroke="#7affb3" stroke-opacity="0.12" stroke-width="6"/>` +
+    `<g class="bl-cells">${bodyCells}${cells(lock)}</g>` +
+    `<g class="bl-feather" style="filter:drop-shadow(8px 12px 20px rgb(0 39 16 / 0.6))"><g mask="url(#bl-reveal)"><path fill="url(#bl-feather)" transform="translate(218 139)" d="${feather}"/></g></g>` +
+    `<g class="bl-cells">${cells(bottomRow)}</g>` +
+    `<g class="bl-cells" style="filter:drop-shadow(-10px 13px 10px rgb(4 74 33 / 0.31))">${cells(shackleRight)}</g>` +
+    `<g class="bl-scan-wrap"><rect class="bl-scan" x="70" y="0" width="859" height="16" rx="8" fill="#7affb3"/></g>` +
+    `</svg>`;
+})();
+
+// Marks the page as loaded so the header logo stops its scan line. Static so its CSP hash is stable.
+const BRAND_LOGO_LOADED_SCRIPT = `<script>
+(() => {
+  const loaded = () => document.documentElement.classList.toggle("cs-loaded", true);
+  if (document.readyState === "complete") loaded();
+  else window.addEventListener("load", loaded);
+})();
+</script>`;
+
 function cipherScript(): string {
   return `<script>
 (() => {

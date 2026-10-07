@@ -403,10 +403,28 @@ struct SealedMessageRootView: View {
 #endif
 #if !APPCLIP
   @State private var isShowingProPaywall = false
+  @State private var showsSplash = true
+  @State private var skipsSplash = false
+#else
+  private let showsSplash = false
 #endif
+  @State private var brandMarkFrame: CGRect?
 
   var body: some View {
     mainInterface
+#if !APPCLIP
+      .overlay {
+        if showsSplash {
+          CryptoscreenSplashView(landingFrame: brandMarkFrame, skipRequested: skipsSplash) {
+            showsSplash = false
+            presentOnboardingIfNeeded()
+          }
+        }
+      }
+#endif
+      .onPreferenceChange(CSBrandMarkFrameKey.self) { frame in
+        brandMarkFrame = frame
+      }
       .task(id: scenePhase) {
         guard scenePhase == .active else { return }
         await store.refreshSentMessageStatuses(allowsInteractionStatus: sharesInteractionStatus)
@@ -421,6 +439,7 @@ struct SealedMessageRootView: View {
         VStack(spacing: 0) {
           HeaderView(
             pendingCount: store.pendingCount,
+            hidesBrandMark: showsSplash,
             onShowSentMessages: {
               isShowingSentMessages = true
             },
@@ -561,10 +580,9 @@ struct SealedMessageRootView: View {
       .presentationBackground(CSTheme.background)
     }
     .onAppear {
-      if !hasCompletedOnboarding {
-        hasCompletedOnboarding = true
-        dismissKeyboard()
-        isShowingOnboarding = true
+      // First launch: onboarding follows the launch splash rather than covering it.
+      if !showsSplash {
+        presentOnboardingIfNeeded()
       }
     }
 #endif
@@ -583,6 +601,20 @@ struct SealedMessageRootView: View {
     incomingPIN = ""
     mode = .open
     isShowingOnboarding = false
+#if !APPCLIP
+    // A message is waiting: land the splash now instead of playing it out.
+    skipsSplash = true
+    hasCompletedOnboarding = true
+#endif
+  }
+
+  private func presentOnboardingIfNeeded() {
+#if !APPCLIP
+    guard !hasCompletedOnboarding else { return }
+    hasCompletedOnboarding = true
+    dismissKeyboard()
+    isShowingOnboarding = true
+#endif
   }
 
   private func presentOnboarding() {
@@ -612,6 +644,7 @@ extension SentMessageStatus {
 
 private struct HeaderView: View {
   let pendingCount: Int
+  var hidesBrandMark = false
   let onShowSentMessages: () -> Void
   let onShowOnboarding: () -> Void
   let onShowPrivacySettings: () -> Void
@@ -622,6 +655,13 @@ private struct HeaderView: View {
   var body: some View {
     HStack(alignment: .center, spacing: 12) {
       BrandMark()
+        // Hidden while the launch splash flies the same logo into this spot.
+        .opacity(hidesBrandMark ? 0 : 1)
+        .background {
+          GeometryReader { proxy in
+            Color.clear.preference(key: CSBrandMarkFrameKey.self, value: proxy.frame(in: .global))
+          }
+        }
 
       VStack(alignment: .leading, spacing: 2) {
         Text("cryptoscreen")
@@ -711,18 +751,11 @@ private struct HeaderView: View {
   }
 }
 
-/// Small app glyph: an eye-slash in a mint tile, echoing the "cover to read" idea.
+/// Small app glyph: the cryptoscreen logo, where the launch splash lands.
 private struct BrandMark: View {
   var body: some View {
-    Image(systemName: "eye.slash.fill")
-      .font(.system(size: 17, weight: .bold))
-      .foregroundStyle(CSTheme.accentInk)
-      .frame(width: 40, height: 40)
-      .background(
-        LinearGradient(colors: [CSTheme.accent, CSTheme.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
-        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-      )
-      .shadow(color: CSTheme.accent.opacity(0.28), radius: 12, y: 4)
+    CryptoscreenLogoMark(size: 40)
+      .shadow(color: CSTheme.accent.opacity(0.16), radius: 10, y: 3)
       .accessibilityHidden(true)
   }
 }
