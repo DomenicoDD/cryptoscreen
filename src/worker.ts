@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-TeII9gRDMXfX5epaUgRoFR0wh4mK/X3PwQjMbtOKJJc='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -2407,18 +2407,19 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         --panel: oklch(13% 0.018 154 / 0.72);
         --panel-solid: oklch(13% 0.018 154);
         --panel-2: oklch(18% 0.02 154);
-        --ink: oklch(95% 0.016 96);
-        --soft-ink: oklch(80% 0.02 116);
-        --muted: oklch(68% 0.026 135);
-        --quiet: oklch(52% 0.024 145);
-        --line: oklch(94% 0.018 96 / 0.1);
-        --line-strong: oklch(94% 0.018 96 / 0.2);
+        --ink: oklch(94% 0.12 148);
+        --soft-ink: oklch(85% 0.13 149);
+        --muted: oklch(73% 0.11 150);
+        --quiet: oklch(58% 0.08 151);
+        --line: oklch(85% 0.15 150 / 0.13);
+        --line-strong: oklch(85% 0.15 150 / 0.24);
+        --glow: 0 0 7px oklch(81% 0.21 152 / 0.38);
         --accent: oklch(81% 0.21 152);
         --accent-dim: oklch(81% 0.21 152 / 0.14);
         --accent-line: oklch(81% 0.21 152 / 0.32);
         --accent-ink: oklch(16% 0.06 153);
         --warn: oklch(78% 0.15 77);
-        --blue: oklch(80% 0.1 220);
+        --blue: oklch(91% 0.17 150);
         --display: "Alpha Lyrae", ui-rounded, "SF Pro Rounded", ui-sans-serif, system-ui, sans-serif;
         --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         --radius: 14px;
@@ -2440,6 +2441,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         font-family: var(--mono);
         text-rendering: optimizeLegibility;
         -webkit-font-smoothing: antialiased;
+        text-shadow: var(--glow);
         overflow-x: hidden;
       }
       body::before {
@@ -2540,14 +2542,6 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         isolation: isolate;
         box-shadow: inset 0 1px 0 oklch(94% 0.018 96 / 0.06), 0 40px 120px -60px oklch(81% 0.21 152 / 0.35);
       }
-      .hero::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: repeating-linear-gradient(180deg, oklch(94% 0.018 96 / 0.025) 0 1px, transparent 1px 4px);
-        pointer-events: none;
-        z-index: 2;
-      }
       .hero::after {
         content: "";
         position: absolute;
@@ -2625,7 +2619,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         line-height: 0.94;
         letter-spacing: -0.01em;
         margin: 0 0 22px;
-        text-shadow: 0 0 40px oklch(81% 0.21 152 / 0.18);
+        text-shadow: -0.04em 0 0 oklch(68% 0.2 25 / 0.32), 0.04em 0 0 oklch(70% 0.16 250 / 0.32), 0 0 34px oklch(81% 0.21 152 / 0.4);
       }
       h2 {
         color: var(--ink);
@@ -2636,6 +2630,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         line-height: 1.04;
         margin: 0;
         text-wrap: balance;
+        text-shadow: -1.5px 0 0 oklch(68% 0.2 25 / 0.28), 1.5px 0 0 oklch(70% 0.16 250 / 0.28), 0 0 18px oklch(81% 0.21 152 / 0.35);
       }
       h3 {
         color: var(--ink);
@@ -2658,6 +2653,58 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         font-size: clamp(17px, 2.6vw, 21px);
         line-height: 1.55;
         max-width: 620px;
+      }
+
+      /* CRT screen */
+      .button.primary, ::selection { text-shadow: none; }
+      .crt {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 60;
+        background: radial-gradient(ellipse 120% 100% at 50% 50%, transparent 58%, oklch(4% 0.02 154 / 0.55) 100%);
+        box-shadow: inset 0 0 120px oklch(4% 0.02 154 / 0.7), inset 0 0 18px oklch(81% 0.21 152 / 0.08);
+        animation: crt-flicker 6s steps(1) infinite;
+      }
+      .crt::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          repeating-linear-gradient(180deg, oklch(0% 0 0 / 0.22) 0 1px, transparent 1px 3px),
+          repeating-linear-gradient(90deg, oklch(70% 0.2 25 / 0.03) 0 1px, oklch(81% 0.21 152 / 0.03) 1px 2px, oklch(70% 0.16 250 / 0.03) 2px 3px);
+      }
+      .crt::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 34vh;
+        background: linear-gradient(180deg, transparent, oklch(81% 0.21 152 / 0.045) 55%, oklch(90% 0.18 150 / 0.07) 62%, transparent);
+        animation: crt-roll 9s linear infinite;
+      }
+      @keyframes crt-roll {
+        from { transform: translateY(-40vh); }
+        to { transform: translateY(110vh); }
+      }
+      @keyframes crt-flicker {
+        0%, 100% { opacity: 1; }
+        41% { opacity: 0.94; }
+        42% { opacity: 1; }
+        77% { opacity: 0.97; }
+        78% { opacity: 1; }
+      }
+      .melted-glass {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 228px;
+        height: 228px;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 61;
+        will-change: transform;
       }
 
       /* Cipher animation */
@@ -3183,6 +3230,8 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     </div>
     ${bodyScript}
     ${cipherScript()}
+    ${meltedGlassScript()}
+    <div class="crt" aria-hidden="true"></div>
   </body>
 </html>`;
 }
@@ -3389,6 +3438,133 @@ function cipherScript(): string {
     card.style.setProperty("--mx", (event.clientX - box.left) + "px");
     card.style.setProperty("--my", (event.clientY - box.top) + "px");
   }, { passive: true });
+})();
+</script>`;
+}
+
+// Melted glass: an invisible region under the cursor that pinches the page inward (zoom out)
+// with a slight RGB split, via an SVG displacement backdrop filter. It sits above the CRT layer
+// so the scanlines bend too. Chromium desktop only; other browsers keep the static CRT look.
+function meltedGlassScript(): string {
+  return `<script>
+(() => {
+  if (typeof window.matchMedia !== "function" || typeof window.requestAnimationFrame !== "function") return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+  const brands = navigator.userAgentData && navigator.userAgentData.brands;
+  if (!brands || !brands.some(b => /Chrom/.test(b.brand))) return;
+
+  const SIZE = 228;
+  const RES = 256;
+  const mapCanvas = document.createElement("canvas");
+  mapCanvas.width = mapCanvas.height = RES;
+  const ctx = mapCanvas.getContext("2d");
+  if (!ctx) return;
+
+  // Displacement d(r) = r * (1 - r^2)^2, normalised: zero at the centre and the rim, with zero
+  // slope at the rim so there is no visible edge. Sampling outward makes the content shrink inward.
+  const image = ctx.createImageData(RES, RES);
+  const half = RES / 2;
+  for (let y = 0; y < RES; y++) {
+    for (let x = 0; x < RES; x++) {
+      const ox = (x + 0.5) / half - 1;
+      const oy = (y + 0.5) / half - 1;
+      const r2 = ox * ox + oy * oy;
+      const falloff = r2 < 1 ? (1 - r2) * (1 - r2) / 0.286 * 0.9 : 0;
+      const o = (y * RES + x) * 4;
+      image.data[o] = 128 + ox * falloff * 127;
+      image.data[o + 1] = 128 + oy * falloff * 127;
+      image.data[o + 2] = 128;
+      image.data[o + 3] = 255;
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("width", "0");
+  svg.setAttribute("height", "0");
+  svg.setAttribute("aria-hidden", "true");
+  svg.style.position = "absolute";
+  const filter = document.createElementNS(NS, "filter");
+  const attrs = { id: "melted-glass", x: "0", y: "0", width: String(SIZE), height: String(SIZE), filterUnits: "userSpaceOnUse", primitiveUnits: "userSpaceOnUse", "color-interpolation-filters": "sRGB" };
+  for (const key in attrs) filter.setAttribute(key, attrs[key]);
+  const add = (tag, values) => {
+    const node = document.createElementNS(NS, tag);
+    for (const key in values) node.setAttribute(key, values[key]);
+    filter.appendChild(node);
+    return node;
+  };
+  add("feImage", { href: mapCanvas.toDataURL(), x: "0", y: "0", width: String(SIZE), height: String(SIZE), preserveAspectRatio: "none", result: "map" });
+  const maps = [];
+  const channels = [["r", "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"], ["g", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"], ["b", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"]];
+  for (const [name, matrix] of channels) {
+    maps.push(add("feDisplacementMap", { in: "SourceGraphic", in2: "map", scale: "0", xChannelSelector: "R", yChannelSelector: "G", result: name + "d" }));
+    add("feColorMatrix", { in: name + "d", type: "matrix", values: matrix, result: name });
+  }
+  add("feBlend", { in: "r", in2: "g", mode: "screen", result: "rg" });
+  add("feBlend", { in: "rg", in2: "b", mode: "screen" });
+  svg.appendChild(filter);
+  document.body.appendChild(svg);
+
+  const glass = document.createElement("div");
+  glass.className = "melted-glass";
+  glass.setAttribute("aria-hidden", "true");
+  glass.style.backdropFilter = "url(#melted-glass)";
+  document.body.appendChild(glass);
+
+  const pointer = { x: 0, y: 0, inside: false };
+  const state = { x: 0, y: 0, vx: 0, vy: 0, strength: 0, drag: 0 };
+  let running = false;
+
+  const frame = () => {
+    // Heavy, viscous follow: slow acceleration and strong damping, no bounce.
+    state.vx = (state.vx + (pointer.x - state.x) * 0.045) * 0.8;
+    state.vy = (state.vy + (pointer.y - state.y) * 0.045) * 0.8;
+    state.x += state.vx;
+    state.y += state.vy;
+    const speed = Math.min(Math.hypot(state.vx, state.vy), 40);
+    state.drag += (speed - state.drag) * 0.08;
+    state.strength += ((pointer.inside ? 1 : 0) - state.strength) * 0.06;
+
+    const smear = Math.min(state.drag / 40, 0.45);
+    const angle = Math.atan2(state.vy, state.vx);
+    glass.style.transform = "translate(" + (state.x - SIZE / 2) + "px," + (state.y - SIZE / 2) + "px) rotate(" + angle + "rad) scale(" + (1 + smear) + "," + (1 - smear * 0.35) + ") rotate(" + (-angle) + "rad)";
+    const amount = (35 + state.drag * 0.95) * state.strength;
+    maps[0].setAttribute("scale", String(amount * 1.05));
+    maps[1].setAttribute("scale", String(amount));
+    maps[2].setAttribute("scale", String(amount * 0.95));
+
+    const settled = Math.abs(pointer.x - state.x) < 0.3 && Math.abs(pointer.y - state.y) < 0.3 && speed < 0.05 && Math.abs((pointer.inside ? 1 : 0) - state.strength) < 0.003;
+    if (settled) {
+      running = false;
+      return;
+    }
+    window.requestAnimationFrame(frame);
+  };
+
+  const wake = () => {
+    if (running) return;
+    running = true;
+    window.requestAnimationFrame(frame);
+  };
+
+  window.addEventListener("pointermove", event => {
+    if (event.pointerType && event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    if (!pointer.inside && state.strength < 0.01) {
+      state.x = event.clientX;
+      state.y = event.clientY;
+    }
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+    pointer.inside = true;
+    wake();
+  }, { passive: true });
+
+  document.documentElement.addEventListener("mouseleave", () => {
+    pointer.inside = false;
+    wake();
+  });
 })();
 </script>`;
 }
