@@ -1418,8 +1418,13 @@ private struct ComposeSealedMessageView: View {
               softHaptic()
             }
 
-            PinEntryField(pin: $pin, placeholder: "PIN", accessibilityLabel: "Create message PIN")
-              .focused($focusedField, equals: .pin)
+            PinEntryField(
+              pin: $pin,
+              placeholder: "PIN",
+              accessibilityLabel: "Create message PIN",
+              focus: $focusedField,
+              field: .pin
+            )
           }
           .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
@@ -2009,6 +2014,11 @@ private struct OpenSealedMessageView: View {
   @State private var statusIcon = "link.badge.plus"
   @State private var statusTint = Color.white.opacity(0.58)
   @State private var isOpening = false
+  @FocusState private var focusedField: OpenField?
+
+  private enum OpenField: Hashable {
+    case pin
+  }
 
   private var canOpen: Bool {
     SealedMessageCrypto.request(from: link) != nil && pin.count == SealedMessageCrypto.pinLength && !isOpening
@@ -2064,7 +2074,13 @@ private struct OpenSealedMessageView: View {
         Text("PIN")
           .formLabelStyle()
 
-        PinEntryField(pin: $pin, placeholder: "PIN", accessibilityLabel: "Open message PIN")
+        PinEntryField(
+          pin: $pin,
+          placeholder: "PIN",
+          accessibilityLabel: "Open message PIN",
+          focus: $focusedField,
+          field: .pin
+        )
       }
 
       Button {
@@ -2162,20 +2178,42 @@ private struct OpenSealedMessageView: View {
   }
 }
 
-private struct PinEntryField: View {
+/// Six PIN cells driven by one hidden numeric text field.
+///
+/// The field owns its focus binding: the cells are a tap target that focuses the
+/// hidden input directly. (An invisible field overlaid on the cells plus an
+/// outer `.focused` modifier let taps land on the message editor instead.)
+private struct PinEntryField<Field: Hashable>: View {
   @Binding var pin: String
   let placeholder: String
   let accessibilityLabel: String
+  let focus: FocusState<Field?>.Binding
+  let field: Field
+
+  private var isFocused: Bool {
+    focus.wrappedValue == field
+  }
 
   var body: some View {
     let digits = Array(pin)
 
     ZStack {
+      TextField(placeholder, text: $pin)
+        .keyboardType(.numberPad)
+        .textContentType(.oneTimeCode)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .focused(focus, equals: field)
+        .frame(width: 1, height: 1)
+        .opacity(0.01)
+        .allowsHitTesting(false)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue("\(digits.count) of \(SealedMessageCrypto.pinLength) digits entered")
+
       HStack(spacing: 8) {
         ForEach(0..<SealedMessageCrypto.pinLength, id: \.self) { index in
           let isFilled = index < digits.count
-          // Callers attach their own focus binding, so highlight the next slot rather than tracking focus here.
-          let isCursor = index == digits.count
+          let isCursor = isFocused && index == digits.count
 
           Text(isFilled ? String(digits[index]) : "")
             .font(CSTheme.mono(24, .semibold))
@@ -2198,20 +2236,11 @@ private struct PinEntryField: View {
             .animation(.easeOut(duration: 0.15), value: isCursor)
         }
       }
+      .contentShape(Rectangle())
+      .onTapGesture {
+        focus.wrappedValue = field
+      }
       .accessibilityHidden(true)
-
-      // The real input: invisible, but sized over the cells so any tap focuses it.
-      TextField(placeholder, text: $pin)
-        .keyboardType(.numberPad)
-        .textContentType(.oneTimeCode)
-        .textInputAutocapitalization(.never)
-        .autocorrectionDisabled()
-        .foregroundStyle(.clear)
-        .tint(.clear)
-        .frame(maxWidth: .infinity, minHeight: 56)
-        .opacity(0.02)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue("\(digits.count) of \(SealedMessageCrypto.pinLength) digits entered")
     }
     .privacySensitive()
     .onAppear {
