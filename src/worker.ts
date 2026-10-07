@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-g19x3rFJygxW143FkITXSRo6ty/+sTTRhj9Uxuz5RvE='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-9izAy4IeG8W9J056SCwghbURku2R78p9Y0UrXYcEHD4='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -2661,15 +2661,16 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
         position: fixed;
         inset: 0;
         pointer-events: none;
-        z-index: 60;
+        z-index: 62;
         background: radial-gradient(ellipse 120% 100% at 50% 50%, transparent 58%, oklch(4% 0.02 154 / 0.55) 100%);
         box-shadow: inset 0 0 120px oklch(4% 0.02 154 / 0.7), inset 0 0 18px oklch(81% 0.21 152 / 0.08);
         animation: crt-flicker 6s steps(1) infinite;
       }
-      .crt::before {
-        content: "";
-        position: absolute;
+      .crt-grid {
+        position: fixed;
         inset: 0;
+        pointer-events: none;
+        z-index: 60;
         /* Phosphor pixel matrix: 4px cells with a dark scan gap and faint green cell borders. */
         background:
           repeating-linear-gradient(180deg, oklch(0% 0 0 / 0.26) 0 1px, transparent 1px 4px),
@@ -2700,16 +2701,9 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       }
       .melted-glass {
         position: fixed;
-        left: 0;
-        top: 0;
-        width: 300px;
-        height: 228px;
+        inset: 0;
         pointer-events: none;
         z-index: 61;
-        will-change: transform;
-        /* Feather the box so resampling from rotation/stretch never shows a rectangular edge. */
-        -webkit-mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
-        mask-image: radial-gradient(closest-side, #000 55%, transparent 100%);
       }
 
       /* Cipher animation */
@@ -3236,6 +3230,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     ${bodyScript}
     ${cipherScript()}
     ${meltedGlassScript()}
+    <div class="crt-grid" aria-hidden="true"></div>
     <div class="crt" aria-hidden="true"></div>
   </body>
 </html>`;
@@ -3447,10 +3442,11 @@ function cipherScript(): string {
 </script>`;
 }
 
-// Melted glass: the cursor is a finger dragged through soft glass. A height field (dent under the
-// cursor, ridge piled up ahead, tapered trough behind) is turned into an SVG displacement backdrop
-// filter, rotated to the direction of motion. Full strength while moving, easing to 10% at rest.
-// Chromium desktop only; other browsers keep the static CRT look.
+// Melted glass: the whole screen is a sheet of soft glass. Moving the cursor presses a groove with
+// raised banks into a persistent height field (it "draws"), which slowly melts back. On top, the live
+// fingertip shape (dent under the cursor, ridge ahead, tapered trough behind) follows the motion.
+// The field becomes an SVG displacement backdrop filter with per-channel scales, so chromatic
+// aberration is strongest on the edges of every slope. Chromium desktop only.
 function meltedGlassScript(): string {
   return `<script>
 (() => {
@@ -3460,18 +3456,20 @@ function meltedGlassScript(): string {
   const brands = navigator.userAgentData && navigator.userAgentData.brands;
   if (!brands || !brands.some(b => /Chrom/.test(b.brand))) return;
 
+  const CELL = 6;
+  const SCALE = 42;
+  const SPREAD = [1.3, 1, 0.7];
   const LENGTH = 300;
   const WIDTH = 228;
   const FINGER = 0.18;
-  const MU = 200;
-  const MV = 152;
-  const mapCanvas = document.createElement("canvas");
-  mapCanvas.width = MU;
-  mapCanvas.height = MV;
-  const ctx = mapCanvas.getContext("2d");
-  if (!ctx) return;
+  const SIGMA_IN = 15;
+  const SIGMA_OUT = 30;
+  const STAMP_STEP = 3;
+  const STAMP_DEPTH = 0.075;
+  const MELT = 0.994;
+  const SPREAD_RATE = 0.06;
 
-  // Surface height in local space: u runs along the direction of motion, v across it, both -1..1.
+  // Fingertip surface in local space: u along the motion, v across it, both -1..1.
   const surface = (u, v) => {
     const r2 = u * u + v * v;
     if (r2 >= 1) return 0;
@@ -3485,30 +3483,16 @@ function meltedGlassScript(): string {
     const tail = -0.4 * Math.exp(-(tu * tu / 0.11 + v * v / tailWidth));
     return (dent + ridge + tail) * Math.pow(1 - r2, 3);
   };
-
-  const gu = new Float32Array(MU * MV);
-  const gv = new Float32Array(MU * MV);
-  const eps = 0.01;
   let peak = 0;
-  for (let y = 0; y < MV; y++) {
-    for (let x = 0; x < MU; x++) {
-      const u = (x + 0.5) / MU * 2 - 1;
-      const v = (y + 0.5) / MV * 2 - 1;
-      const i = y * MU + x;
-      gu[i] = (surface(u + eps, v) - surface(u - eps, v)) / (2 * eps);
-      gv[i] = (surface(u, v + eps) - surface(u, v - eps)) / (2 * eps);
-      peak = Math.max(peak, Math.abs(gu[i]), Math.abs(gv[i]));
+  for (let y = 0; y < 76; y++) {
+    for (let x = 0; x < 100; x++) {
+      const u = (x + 0.5) / 50 - 1;
+      const v = (y + 0.5) / 38 - 1;
+      peak = Math.max(peak, Math.abs(surface(u + 0.01, v) - surface(u - 0.01, v)) / 0.02);
     }
   }
-  // Sampling along +gradient: the dent pinches inward (zoom out), the ridge magnifies slightly.
-  const image = ctx.createImageData(MU, MV);
-  for (let i = 0; i < MU * MV; i++) {
-    image.data[i * 4] = 128 + gu[i] / peak * 127;
-    image.data[i * 4 + 1] = 128 + gv[i] / peak * 127;
-    image.data[i * 4 + 2] = 128;
-    image.data[i * 4 + 3] = 255;
-  }
-  ctx.putImageData(image, 0, 0);
+  // Height slope per cell -> map counts; the full-strength fingertip peaks around 70 counts.
+  const GAIN = 70 / (peak * CELL / (LENGTH / 2)) / 2;
 
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
@@ -3517,21 +3501,23 @@ function meltedGlassScript(): string {
   svg.setAttribute("aria-hidden", "true");
   svg.style.position = "absolute";
   const filter = document.createElementNS(NS, "filter");
-  const attrs = { id: "melted-glass", x: "0", y: "0", width: String(LENGTH), height: String(WIDTH), filterUnits: "userSpaceOnUse", primitiveUnits: "userSpaceOnUse", "color-interpolation-filters": "sRGB" };
-  for (const key in attrs) filter.setAttribute(key, attrs[key]);
+  for (const [key, value] of [["id", "melted-glass"], ["x", "0"], ["y", "0"], ["filterUnits", "userSpaceOnUse"], ["primitiveUnits", "userSpaceOnUse"], ["color-interpolation-filters", "sRGB"]]) filter.setAttribute(key, value);
   const add = (tag, values) => {
     const node = document.createElementNS(NS, tag);
     for (const key in values) node.setAttribute(key, values[key]);
     filter.appendChild(node);
     return node;
   };
-  add("feImage", { href: mapCanvas.toDataURL(), x: "0", y: "0", width: String(LENGTH), height: String(WIDTH), preserveAspectRatio: "none", result: "map" });
-  const maps = [];
+  const feImage = add("feImage", { x: "0", y: "0", preserveAspectRatio: "none", result: "map" });
+  // An 8-bit map cannot encode exactly 0.5, so pre-shift each channel to cancel the neutral drift.
+  const drift = 128 / 255 - 0.5;
   const channels = [["r", "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"], ["g", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"], ["b", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"]];
-  for (const [name, matrix] of channels) {
-    maps.push(add("feDisplacementMap", { in: "SourceGraphic", in2: "map", scale: "0", xChannelSelector: "R", yChannelSelector: "G", result: name + "d" }));
+  channels.forEach(([name, matrix], index) => {
+    const scale = SCALE * SPREAD[index];
+    add("feOffset", { in: "SourceGraphic", dx: String(scale * drift), dy: String(scale * drift), result: name + "s" });
+    add("feDisplacementMap", { in: name + "s", in2: "map", scale: String(scale), xChannelSelector: "R", yChannelSelector: "G", result: name + "d" });
     add("feColorMatrix", { in: name + "d", type: "matrix", values: matrix, result: name });
-  }
+  });
   add("feBlend", { in: "r", in2: "g", mode: "screen", result: "rg" });
   add("feBlend", { in: "rg", in2: "b", mode: "screen" });
   svg.appendChild(filter);
@@ -3540,12 +3526,152 @@ function meltedGlassScript(): string {
   const glass = document.createElement("div");
   glass.className = "melted-glass";
   glass.setAttribute("aria-hidden", "true");
-  glass.style.backdropFilter = "url(#melted-glass)";
   document.body.appendChild(glass);
 
-  const pointer = { x: 0, y: 0, inside: false, lastMove: 0, vx: 0, vy: 0 };
+  const mapCanvas = document.createElement("canvas");
+  const ctx = mapCanvas.getContext("2d");
+  if (!ctx) return;
+  let cols = 0;
+  let rows = 0;
+  let field = new Float32Array(0);
+  let scratch = new Float32Array(0);
+  let render = new Float32Array(0);
+  let image = null;
+
+  const resize = () => {
+    cols = Math.ceil(window.innerWidth / CELL) + 2;
+    rows = Math.ceil(window.innerHeight / CELL) + 2;
+    field = new Float32Array(cols * rows);
+    scratch = new Float32Array(cols * rows);
+    render = new Float32Array(cols * rows);
+    mapCanvas.width = cols;
+    mapCanvas.height = rows;
+    image = ctx.createImageData(cols, rows);
+    const w = String(cols * CELL);
+    const h = String(rows * CELL);
+    filter.setAttribute("width", w);
+    filter.setAttribute("height", h);
+    feImage.setAttribute("width", w);
+    feImage.setAttribute("height", h);
+    feImage.setAttribute("x", String(-CELL / 2));
+    feImage.setAttribute("y", String(-CELL / 2));
+    glass.style.backdropFilter = "none";
+    filterOn = false;
+  };
+
+  // Draw: a volume-preserving stamp, a groove where the cursor passes with glass pushed up beside it.
+  const bank = STAMP_DEPTH * (SIGMA_IN * SIGMA_IN) / (SIGMA_OUT * SIGMA_OUT);
+  const stamp = (px, py, weight) => {
+    const reach = Math.ceil(SIGMA_OUT * 2.6 / CELL);
+    const gx = Math.round(px / CELL);
+    const gy = Math.round(py / CELL);
+    for (let j = -reach; j <= reach; j++) {
+      const y = gy + j;
+      if (y < 1 || y >= rows - 1) continue;
+      for (let i = -reach; i <= reach; i++) {
+        const x = gx + i;
+        if (x < 1 || x >= cols - 1) continue;
+        const dx = x * CELL - px;
+        const dy = y * CELL - py;
+        const r2 = dx * dx + dy * dy;
+        const k = y * cols + x;
+        const next = field[k] + weight * (bank * Math.exp(-r2 / (2 * SIGMA_OUT * SIGMA_OUT)) - STAMP_DEPTH * Math.exp(-r2 / (2 * SIGMA_IN * SIGMA_IN)));
+        field[k] = next < -1.4 ? -1.4 : next > 1.4 ? 1.4 : next;
+      }
+    }
+  };
+
+  // Melt: spread each mark into its neighbours and let it slowly flatten.
+  const melt = () => {
+    let energy = 0;
+    for (let y = 1; y < rows - 1; y++) {
+      for (let x = 1; x < cols - 1; x++) {
+        const k = y * cols + x;
+        const lap = field[k - 1] + field[k + 1] + field[k - cols] + field[k + cols] - 4 * field[k];
+        const next = (field[k] + lap * SPREAD_RATE) * MELT;
+        scratch[k] = next;
+        const a = next < 0 ? -next : next;
+        if (a > energy) energy = a;
+      }
+    }
+    const swap = field;
+    field = scratch;
+    scratch = swap;
+    return energy;
+  };
+
+  const pointer = { x: 0, y: 0, inside: false, lastMove: 0, vx: 0, vy: 0, drawX: 0, drawY: 0 };
   const state = { x: 0, y: 0, angle: 0, speed: 0, strength: 0 };
   let running = false;
+  let filterOn = false;
+  let uploading = false;
+  let dirty = false;
+
+  const upload = () => {
+    if (uploading) {
+      dirty = true;
+      return;
+    }
+    dirty = false;
+    ctx.putImageData(image, 0, 0);
+    const url = mapCanvas.toDataURL();
+    uploading = true;
+    const preload = new Image();
+    preload.onload = preload.onerror = () => {
+      feImage.setAttribute("href", url);
+      uploading = false;
+      if (!filterOn) {
+        glass.style.backdropFilter = "url(#melted-glass)";
+        filterOn = true;
+      }
+      if (dirty) upload();
+    };
+    preload.src = url;
+  };
+
+  const compose = (amp, stretch) => {
+    render.set(field);
+    if (amp > 0.001) {
+      const halfL = LENGTH / 2 * stretch;
+      const halfW = WIDTH / 2 * (1 - (stretch - 1) * 0.25);
+      const reach = FINGER * halfL;
+      const cos = Math.cos(state.angle);
+      const sin = Math.sin(state.angle);
+      const cx = state.x - cos * reach;
+      const cy = state.y - sin * reach;
+      const box = Math.ceil(halfL / CELL) + 1;
+      const gx = Math.round(cx / CELL);
+      const gy = Math.round(cy / CELL);
+      for (let j = -box; j <= box; j++) {
+        const y = gy + j;
+        if (y < 0 || y >= rows) continue;
+        for (let i = -box; i <= box; i++) {
+          const x = gx + i;
+          if (x < 0 || x >= cols) continue;
+          const dx = x * CELL - cx;
+          const dy = y * CELL - cy;
+          const u = (dx * cos + dy * sin) / halfL;
+          const v = (-dx * sin + dy * cos) / halfW;
+          if (u * u + v * v >= 1) continue;
+          render[y * cols + x] += amp * surface(u, v);
+        }
+      }
+    }
+    const data = image.data;
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const k = y * cols + x;
+        const gxv = x > 0 && x < cols - 1 ? (render[k + 1] - render[k - 1]) * GAIN : 0;
+        const gyv = y > 0 && y < rows - 1 ? (render[k + cols] - render[k - cols]) * GAIN : 0;
+        const o = k * 4;
+        data[o] = 128 + (gxv < -127 ? -127 : gxv > 127 ? 127 : gxv);
+        data[o + 1] = 128 + (gyv < -127 ? -127 : gyv > 127 ? 127 : gyv);
+        data[o + 2] = 128;
+        data[o + 3] = 255;
+      }
+    }
+    upload();
+  };
 
   const frame = now => {
     const moving = pointer.inside && now - pointer.lastMove < 70;
@@ -3553,34 +3679,43 @@ function meltedGlassScript(): string {
       pointer.vx *= 0.85;
       pointer.vy *= 0.85;
     }
-    // Strength: quick press while moving, ease-out release to 10% at rest, 0 when outside.
     const target = !pointer.inside ? 0 : moving ? 1 : 0.1;
     state.strength += (target - state.strength) * (target > state.strength ? 0.22 : 0.05);
-
     state.x += (pointer.x - state.x) * 0.35;
     state.y += (pointer.y - state.y) * 0.35;
     const velocity = Math.hypot(pointer.vx, pointer.vy);
     state.speed += (Math.min(velocity, 40) - state.speed) * 0.15;
     if (velocity > 0.6) {
-      const wanted = Math.atan2(pointer.vy, pointer.vx);
-      let delta = wanted - state.angle;
+      let delta = Math.atan2(pointer.vy, pointer.vx) - state.angle;
       while (delta > Math.PI) delta -= Math.PI * 2;
       while (delta < -Math.PI) delta += Math.PI * 2;
       state.angle += delta * 0.18;
     }
 
+    if (moving) {
+      const dx = state.x - pointer.drawX;
+      const dy = state.y - pointer.drawY;
+      const distance = Math.hypot(dx, dy);
+      const steps = Math.floor(distance / STAMP_STEP);
+      for (let s = 1; s <= steps; s++) stamp(pointer.drawX + dx * s / steps, pointer.drawY + dy * s / steps, 1);
+      if (steps) {
+        pointer.drawX = state.x;
+        pointer.drawY = state.y;
+      }
+    }
+    const energy = melt();
     const stretch = 1 + Math.min(state.speed / 40, 1) * 0.35;
-    const reach = FINGER * LENGTH / 2 * stretch;
-    const cx = state.x - Math.cos(state.angle) * reach;
-    const cy = state.y - Math.sin(state.angle) * reach;
-    glass.style.transform = "translate(" + (cx - LENGTH / 2) + "px," + (cy - WIDTH / 2) + "px) rotate(" + state.angle + "rad) scale(" + stretch + "," + (1 - (stretch - 1) * 0.25) + ")";
-    const amount = (26 + state.speed * 0.3) * state.strength;
-    maps[0].setAttribute("scale", String(amount * 1.05));
-    maps[1].setAttribute("scale", String(amount));
-    maps[2].setAttribute("scale", String(amount * 0.95));
+    const amp = state.strength * (1 + state.speed * 0.012);
+    compose(amp, stretch);
 
-    const settled = !moving && Math.abs(target - state.strength) < 0.002 && Math.abs(pointer.x - state.x) < 0.3 && Math.abs(pointer.y - state.y) < 0.3 && state.speed < 0.05;
-    if (settled) {
+    const fingerSettled = !moving && Math.abs(target - state.strength) < 0.002 && state.speed < 0.05 && Math.abs(pointer.x - state.x) < 0.3 && Math.abs(pointer.y - state.y) < 0.3;
+    if (fingerSettled && energy < 0.004) {
+      field.fill(0);
+      compose(amp, stretch);
+      if (!pointer.inside) {
+        glass.style.backdropFilter = "none";
+        filterOn = false;
+      }
       running = false;
       return;
     }
@@ -3593,15 +3728,19 @@ function meltedGlassScript(): string {
     window.requestAnimationFrame(frame);
   };
 
+  resize();
+  window.addEventListener("resize", () => {
+    resize();
+    wake();
+  });
+
   window.addEventListener("pointermove", event => {
     if (event.pointerType && event.pointerType !== "mouse" && event.pointerType !== "pen") return;
     const x = event.clientX;
     const y = event.clientY;
     if (!pointer.inside && state.strength < 0.01) {
-      state.x = x;
-      state.y = y;
-      pointer.x = x;
-      pointer.y = y;
+      state.x = pointer.x = pointer.drawX = x;
+      state.y = pointer.y = pointer.drawY = y;
     }
     pointer.vx = pointer.vx * 0.6 + (x - pointer.x) * 0.4;
     pointer.vy = pointer.vy * 0.6 + (y - pointer.y) * 0.4;
