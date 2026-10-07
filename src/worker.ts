@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-TeII9gRDMXfX5epaUgRoFR0wh4mK/X3PwQjMbtOKJJc='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-Y0TJ6Tff4I8HDDAYTNYsNQ703l2AkKunPm8mT91EV3g='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -3530,7 +3530,7 @@ function meltedGlassScript(): string {
     const smear = Math.min(state.drag / 40, 0.45);
     const angle = Math.atan2(state.vy, state.vx);
     glass.style.transform = "translate(" + (state.x - SIZE / 2) + "px," + (state.y - SIZE / 2) + "px) rotate(" + angle + "rad) scale(" + (1 + smear) + "," + (1 - smear * 0.35) + ") rotate(" + (-angle) + "rad)";
-    const amount = (35 + state.drag * 0.95) * state.strength;
+    const amount = (24.5 + state.drag * 0.665) * state.strength;
     maps[0].setAttribute("scale", String(amount * 1.05));
     maps[1].setAttribute("scale", String(amount));
     maps[2].setAttribute("scale", String(amount * 0.95));
