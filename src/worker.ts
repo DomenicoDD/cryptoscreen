@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-p/cu4WRmo4TAkHdXlzLOEDtH9qPmmEJemgPMAM8pkdI=' 'sha256-+RY4XDwl+J7KAzZ6EeJi2DKTAdxsEbkbt48HhH0RIrY=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-tQVzJNpePIk/KfH+OJPj9OZdcrkPqQ57VLL0UygK5Mw=' 'sha256-PZlfPCbjh4Ng7Dq6+j7TXA9dt7rF8H68o7CkNIctWpk=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk=' 'sha256-gHlkWa1i2UkQ8DWMgfDzIz8zXAQjFnYQ2U1Jv9LJ6zQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-p/cu4WRmo4TAkHdXlzLOEDtH9qPmmEJemgPMAM8pkdI=' 'sha256-+RY4XDwl+J7KAzZ6EeJi2DKTAdxsEbkbt48HhH0RIrY=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-tQVzJNpePIk/KfH+OJPj9OZdcrkPqQ57VLL0UygK5Mw=' 'sha256-PZlfPCbjh4Ng7Dq6+j7TXA9dt7rF8H68o7CkNIctWpk=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk=' 'sha256-gHlkWa1i2UkQ8DWMgfDzIz8zXAQjFnYQ2U1Jv9LJ6zQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-JOI6/yJJLtm/QmY+WuLhB89Wrhx/TJLpM/sMajiMIRc='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -3325,6 +3325,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     ${intro ? INTRO_SCRIPT : ""}
     ${CALM_TOGGLE_MARKUP}
     ${CALM_TOGGLE_SCRIPT}
+    ${CONSOLE_ART_SCRIPT}
     <div class="crt-grid" aria-hidden="true"></div>
     <div class="crt" aria-hidden="true"></div>
   </body>
@@ -3488,6 +3489,32 @@ const BRAND_LOGO_LOADED_SCRIPT = `<script>
   const loaded = () => document.documentElement.classList.toggle("cs-loaded", true);
   if (document.readyState === "complete") loaded();
   else window.addEventListener("load", loaded);
+})();
+</script>`;
+
+// Hello to anyone opening the console: the logo as ASCII art. Static so its CSP hash is stable.
+const CONSOLE_ART_SCRIPT = `<script>
+(() => {
+  const art = [
+    "          @@@@@@@@@@@",
+    "        @@@@       @@@@",
+    "       @@@           @@@",
+    "       @@@           @@@",
+    "       @@@           @@@                  ,       cryptoscreen",
+    "    @@@@@@@@@@@@@@@@@@@@@@@            ,/",
+    "    @@@@@@@@@@@@@@@@@@@@@@@          ,//          Messages you read once.",
+    "    @@@@@@@@@@   @@@@@@@@@@        ,///           Encrypted on your device, opened with a PIN,",
+    "    @@@@@@@@@     @@@@@@@@@      ,///             deleted from the server after one read.",
+    "    @@@@@@@@@@   @@@@@@@@@@    ,///",
+    "    @@@@@@@@@@@ @@@@@@@@@@@  ,///                 Curious how it works? Read the code:",
+    "    @@@@@@@@@@@ @@@@@@@@@@ ,///                   https://github.com/DomenicoDD/cryptoscreen",
+    "    @@@@@@@@@@@@@@@@@@@@@,///",
+    "    @@@@@@@@@@@@@@@@@@@,///                       Follow me on X:",
+    "                     ,///                         https://x.com/domenicodd",
+    "                    ///",
+    "                   /"
+  ];
+  console.log("%c" + art.join(String.fromCharCode(10)), "color:#7affb3;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.3");
 })();
 </script>`;
 
