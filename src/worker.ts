@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-yAhnd5A08Hmg46T/DeLZpxUKm/aIAraDagahckopkoI=' 'sha256-6lByopFgpfT2FePkqXJ7fprpxz/Zx85OAOgzGg851wQ=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-iXNdAZUnNPTTN8ntUFTlBOwM/JD4+oYCd55PzAQp7vE=' 'sha256-T+cXGHgKoO0akuDnpFZFE1ONtL1SvJa4xle45q5olMA=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk=' 'sha256-gHlkWa1i2UkQ8DWMgfDzIz8zXAQjFnYQ2U1Jv9LJ6zQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-p/cu4WRmo4TAkHdXlzLOEDtH9qPmmEJemgPMAM8pkdI=' 'sha256-+RY4XDwl+J7KAzZ6EeJi2DKTAdxsEbkbt48HhH0RIrY=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-tQVzJNpePIk/KfH+OJPj9OZdcrkPqQ57VLL0UygK5Mw=' 'sha256-PZlfPCbjh4Ng7Dq6+j7TXA9dt7rF8H68o7CkNIctWpk=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk=' 'sha256-gHlkWa1i2UkQ8DWMgfDzIz8zXAQjFnYQ2U1Jv9LJ6zQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -2518,7 +2518,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       .brand-logo .bl-feather { transform-box: fill-box; transform-origin: 20% 90%; animation: bl-drop 650ms var(--ease-out) 1150ms both; }
       .brand-logo .bl-reveal { transform-box: fill-box; transform-origin: top; animation: bl-reveal 560ms cubic-bezier(0.33, 1, 0.68, 1) 1150ms both; }
       .brand-logo .bl-scan-wrap { opacity: 1; transition: opacity 220ms ease-out; }
-      html.cs-loaded .brand-logo .bl-scan-wrap { opacity: 0; }
+      html.cs-loaded .brand-logo .bl-scan-wrap { display: none; }
       .brand-logo .bl-scan { opacity: 0; animation: bl-scan-in 240ms ease-out 1700ms both, bl-scan-move 1050ms ease-in-out 1700ms infinite alternate both; }
       @keyframes bl-tile { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
       @keyframes bl-cell {
@@ -2542,6 +2542,21 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       html.cs-calm { scroll-behavior: auto; }
       html.cs-calm.cs-intro { overflow: auto; }
       html.cs-calm .brand .brand-logo { visibility: visible; }
+      /* Keep the CRT identity on constrained devices without continuous compositing. */
+      html.cs-lite .crt, html.cs-lite .hero-illustration, html.cs-lite .brand-mark,
+      html.cs-lite .hero h1::after { animation: none; }
+      html.cs-lite .brand-logo .bl-scan-wrap { display: none; }
+      html.cs-lite header, html.cs-lite .calm-toggle,
+      html.cs-calm header, html.cs-calm .calm-toggle {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        background: var(--bg);
+      }
+      html.cs-lite .crt-grid {
+        background: repeating-linear-gradient(180deg, oklch(0% 0 0 / 0.18) 0 1px, transparent 1px 4px);
+      }
+      html.cs-lite .melted-glass { display: none; }
+      html.cs-paused *, html.cs-paused *::before, html.cs-paused *::after { animation-play-state: paused !important; }
       .calm-toggle {
         position: fixed;
         right: calc(16px + env(safe-area-inset-right, 0px));
@@ -3480,9 +3495,23 @@ const BRAND_LOGO_LOADED_SCRIPT = `<script>
 // in this browser. The head script applies it before first paint so nothing starts moving.
 const CALM_GATE_SCRIPT = `<script>
 (() => {
+  const root = document.documentElement;
   try {
-    if (localStorage.getItem("cs-calm") === "1") document.documentElement.classList.toggle("cs-calm", true);
+    if (localStorage.getItem("cs-calm") === "1") root.classList.toggle("cs-calm", true);
   } catch (error) {}
+  if (typeof window.matchMedia !== "function") return;
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const constrained = window.matchMedia("(hover: none), (pointer: coarse)").matches ||
+    (navigator.hardwareConcurrency > 0 && navigator.hardwareConcurrency <= 4) ||
+    (navigator.deviceMemory > 0 && navigator.deviceMemory <= 4) ||
+    !!(navigator.connection && navigator.connection.saveData);
+  const sync = () => {
+    root.classList.toggle("cs-lite", constrained || reduced.matches);
+    if (reduced.matches) root.classList.add("cs-calm");
+  };
+  sync();
+  reduced.addEventListener("change", sync);
+  document.addEventListener("visibilitychange", () => root.classList.toggle("cs-paused", document.hidden));
 })();
 </script>`;
 
@@ -3527,6 +3556,7 @@ const INTRO_GATE_SCRIPT = `<script>
   try {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     if (localStorage.getItem("cs-calm") === "1") return;
+    if (document.documentElement.classList.contains("cs-lite")) return;
     if (sessionStorage.getItem("cs-intro")) return;
     sessionStorage.setItem("cs-intro", "1");
     document.documentElement.classList.toggle("cs-intro", true);
@@ -3698,12 +3728,13 @@ function cipherScript(): string {
 (() => {
   if (typeof window.matchMedia !== "function" || typeof window.requestAnimationFrame !== "function" || typeof window.IntersectionObserver !== "function") return;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  const calm = () => document.documentElement.classList.contains("cs-calm");
+  const calm = () => document.documentElement.classList.contains("cs-calm") || document.documentElement.classList.contains("cs-lite");
   if (calm()) return;
 
   const GLYPHS = "abcdefghkmnopqrsuvwxyz0123456789#%*+=<>/?";
   const DIGITS = "0123456789";
   const running = new WeakSet();
+  const finishes = new Set();
   const pick = set => set[Math.floor(Math.random() * set.length)];
   const isTextOnly = el => el.childNodes.length > 0 && Array.from(el.childNodes).every(node => node.nodeType === 3) && el.textContent.trim().length > 0;
 
@@ -3750,10 +3781,13 @@ function cipherScript(): string {
       if (shell.parentNode === el) el.textContent = text;
       if (live) el.setAttribute("aria-live", live);
       running.delete(el);
+      finishes.delete(finish);
     };
+    finishes.add(finish);
     window.setTimeout(finish, delay + cells.length * spacing + scramble * 1.2 + 1500);
     const frame = now => {
       if (done) return;
+      if (calm() || document.hidden) { finish(); return; }
       if (!origin) origin = now;
       const t = now - origin;
       let pending = 0;
@@ -3779,13 +3813,7 @@ function cipherScript(): string {
     window.requestAnimationFrame(frame);
   };
 
-  const reveal = Array.from(document.querySelectorAll("h1, h2, h3, .eyebrow, .stat-value, .stat-label, article > span, .section-number"));
-  const jobs = new Map();
-  for (const el of reveal) {
-    const job = prepare(el);
-    if (job) jobs.set(el, job);
-  }
-
+  const reveal = Array.from(document.querySelectorAll("h1, h2, h3, .eyebrow, .stat-value, .section-number"));
   const fades = Array.from(document.querySelectorAll("main article, .copy-stack > p, .security-list li, .link-list a, .toc a, .lede, .hero .actions"));
   for (const el of fades) el.classList.add("rv");
 
@@ -3795,9 +3823,8 @@ function cipherScript(): string {
       if (!entry.isIntersecting) continue;
       const el = entry.target;
       observer.unobserve(el);
-      const job = jobs.get(el);
+      const job = reveal.includes(el) && !calm() ? prepare(el) : null;
       if (job) {
-        jobs.delete(el);
         const big = el.tagName === "H1";
         play(job, { delay: order * 90, step: big ? 70 : 26, scramble: big ? 760 : 480 });
       } else {
@@ -3807,7 +3834,7 @@ function cipherScript(): string {
       order++;
     }
   }, { rootMargin: "0px 0px -6% 0px" });
-  for (const el of jobs.keys()) observer.observe(el);
+  for (const el of reveal) observer.observe(el);
   for (const el of fades) observer.observe(el);
 
   const hoverTargets = document.querySelectorAll("header nav a, .button, .link-list a, footer a");
@@ -3821,13 +3848,29 @@ function cipherScript(): string {
     el.addEventListener("focus", shuffle);
   }
 
+  // Coalesce high-frequency pointer events into one layout read/write per frame.
+  let pointerFrame = 0;
+  let latestPointer = null;
   document.addEventListener("pointermove", event => {
-    const card = event.target instanceof Element ? event.target.closest("article") : null;
-    if (!card) return;
-    const box = card.getBoundingClientRect();
-    card.style.setProperty("--mx", (event.clientX - box.left) + "px");
-    card.style.setProperty("--my", (event.clientY - box.top) + "px");
+    if (calm() || event.pointerType === "touch") return;
+    latestPointer = event;
+    if (pointerFrame) return;
+    pointerFrame = requestAnimationFrame(() => {
+      pointerFrame = 0;
+      if (calm()) return;
+      const card = latestPointer.target instanceof Element ? latestPointer.target.closest("article") : null;
+      if (!card) return;
+      const box = card.getBoundingClientRect();
+      card.style.setProperty("--mx", (latestPointer.clientX - box.left) + "px");
+      card.style.setProperty("--my", (latestPointer.clientY - box.top) + "px");
+    });
   }, { passive: true });
+  new MutationObserver(() => {
+    if (!calm()) return;
+    observer.disconnect();
+    for (const finish of finishes) finish();
+    for (const el of fades) el.classList.add("rv-in");
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 })();
 </script>`;
 }
@@ -3835,8 +3878,8 @@ function cipherScript(): string {
 // Melted glass: the whole screen is a sheet of soft glass. Moving the cursor presses a groove with
 // raised banks into a persistent height field (it "draws"), which slowly melts back. On top, the live
 // fingertip shape (dent under the cursor, ridge ahead, tapered trough behind) follows the motion.
-// The field becomes an SVG displacement backdrop filter with per-channel scales, so chromatic
-// aberration is strongest on the edges of every slope. Chromium desktop only.
+// A single displacement pass preserves the lens at a fraction of the old RGB filter cost.
+// Work is capped, activity-driven, and disabled when the device cannot keep up. Chromium desktop only.
 function meltedGlassScript(): string {
   return `<script>
 (() => {
@@ -3845,11 +3888,15 @@ function meltedGlassScript(): string {
   if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
   const brands = navigator.userAgentData && navigator.userAgentData.brands;
   if (!brands || !brands.some(b => /Chrom/.test(b.brand))) return;
-  const calm = () => document.documentElement.classList.contains("cs-calm");
+  const root = document.documentElement;
+  const calm = () => root.classList.contains("cs-calm") || root.classList.contains("cs-lite");
+  if (calm()) return;
+  // Full-screen filters scale with physical pixels, even with a small displacement map.
+  const oversized = () => innerWidth * innerHeight * Math.pow(devicePixelRatio || 1, 2) > 6000000;
+  if (oversized()) { root.classList.add("cs-lite"); return; }
 
-  const CELL = 6;
+  let CELL = 8;
   const SCALE = 42;
-  const SPREAD = [1.3, 1, 0.7];
   const LENGTH = 300;
   const WIDTH = 228;
   const FINGER = 0.18;
@@ -3883,7 +3930,7 @@ function meltedGlassScript(): string {
     }
   }
   // Height slope per cell -> map counts; the full-strength fingertip peaks around 70 counts.
-  const GAIN = 70 / (peak * CELL / (LENGTH / 2)) / 2;
+  let GAIN = 0;
 
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
@@ -3902,15 +3949,8 @@ function meltedGlassScript(): string {
   const feImage = add("feImage", { x: "0", y: "0", preserveAspectRatio: "none", result: "map" });
   // An 8-bit map cannot encode exactly 0.5, so pre-shift each channel to cancel the neutral drift.
   const drift = 128 / 255 - 0.5;
-  const channels = [["r", "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"], ["g", "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0"], ["b", "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0"]];
-  channels.forEach(([name, matrix], index) => {
-    const scale = SCALE * SPREAD[index];
-    add("feOffset", { in: "SourceGraphic", dx: String(scale * drift), dy: String(scale * drift), result: name + "s" });
-    add("feDisplacementMap", { in: name + "s", in2: "map", scale: String(scale), xChannelSelector: "R", yChannelSelector: "G", result: name + "d" });
-    add("feColorMatrix", { in: name + "d", type: "matrix", values: matrix, result: name });
-  });
-  add("feBlend", { in: "r", in2: "g", mode: "screen", result: "rg" });
-  add("feBlend", { in: "rg", in2: "b", mode: "screen" });
+  add("feOffset", { in: "SourceGraphic", dx: String(SCALE * drift), dy: String(SCALE * drift), result: "source" });
+  add("feDisplacementMap", { in: "source", in2: "map", scale: String(SCALE), xChannelSelector: "R", yChannelSelector: "G" });
   svg.appendChild(filter);
   document.body.appendChild(svg);
 
@@ -3930,6 +3970,8 @@ function meltedGlassScript(): string {
   let image = null;
 
   const resize = () => {
+    CELL = Math.max(8, Math.ceil(Math.sqrt(innerWidth * innerHeight / 28000)));
+    GAIN = 70 / (peak * CELL / (LENGTH / 2)) / 2;
     cols = Math.ceil(window.innerWidth / CELL) + 2;
     rows = Math.ceil(window.innerHeight / CELL) + 2;
     field = new Float32Array(cols * rows);
@@ -3972,13 +4014,14 @@ function meltedGlassScript(): string {
   };
 
   // Melt: spread each mark into its neighbours and let it slowly flatten.
-  const melt = () => {
+  const melt = elapsed => {
+    const decay = Math.pow(MELT, elapsed / (1000 / 60));
     let energy = 0;
     for (let y = 1; y < rows - 1; y++) {
       for (let x = 1; x < cols - 1; x++) {
         const k = y * cols + x;
         const lap = field[k - 1] + field[k + 1] + field[k - cols] + field[k + cols] - 4 * field[k];
-        const next = (field[k] + lap * SPREAD_RATE) * MELT;
+        const next = (field[k] + lap * SPREAD_RATE) * decay;
         scratch[k] = next;
         const a = next < 0 ? -next : next;
         if (a > energy) energy = a;
@@ -3995,7 +4038,12 @@ function meltedGlassScript(): string {
   let running = false;
   let filterOn = false;
   let uploading = false;
-  let dirty = false;
+  let frameId = 0;
+  let lastFrame = 0;
+  let generation = 0;
+  let slowFrames = 0;
+  let interval = 1000 / 30;
+  let scrollingUntil = 0;
   let mapUrl = null;
 
   const filterOff = () => {
@@ -4005,32 +4053,51 @@ function meltedGlassScript(): string {
 
   // The map goes to the filter as a short-lived blob URL. A data: URL per frame left every decoded
   // frame in the image cache, so memory grew until the tab slowed down and reloaded.
+  const stop = () => {
+    running = false;
+    cancelAnimationFrame(frameId);
+    frameId = 0;
+    lastFrame = 0;
+    generation++;
+    field.fill(0);
+    scratch.fill(0);
+    state.strength = state.speed = 0;
+    pointer.inside = false;
+    pointer.vx = pointer.vy = 0;
+    filterOff();
+    feImage.removeAttribute("href");
+    if (mapUrl) URL.revokeObjectURL(mapUrl);
+    mapUrl = null;
+  };
+
   const upload = () => {
-    if (uploading) {
-      dirty = true;
-      return;
-    }
-    dirty = false;
+    // Never queue encodes: the next frame will use the latest field.
+    if (uploading) return;
+    const version = generation;
     ctx.putImageData(image, 0, 0);
     uploading = true;
     mapCanvas.toBlob(blob => {
-      if (!blob) {
+      if (!blob || version !== generation || !running || calm() || document.hidden) {
         uploading = false;
         return;
       }
       const url = URL.createObjectURL(blob);
       const preload = new Image();
-      preload.onload = preload.onerror = () => {
+      preload.onload = () => {
+        uploading = false;
+        if (version !== generation || !running || calm() || document.hidden) {
+          URL.revokeObjectURL(url);
+          return;
+        }
         feImage.setAttribute("href", url);
         if (mapUrl) URL.revokeObjectURL(mapUrl);
         mapUrl = url;
-        uploading = false;
-        if (!filterOn && running && !calm()) {
+        if (!filterOn) {
           glass.style.backdropFilter = "url(#melted-glass)";
           filterOn = true;
         }
-        if (dirty) upload();
       };
+      preload.onerror = () => { uploading = false; URL.revokeObjectURL(url); };
       preload.src = url;
     });
   };
@@ -4080,18 +4147,24 @@ function meltedGlassScript(): string {
   };
 
   const frame = now => {
-    if (calm()) {
-      field.fill(0);
-      filterOff();
-      running = false;
+    frameId = 0;
+    if (calm() || document.hidden || now - pointer.lastMove > 900 || now < scrollingUntil) {
+      stop();
       return;
     }
+    const elapsed = lastFrame ? now - lastFrame : interval;
+    if (elapsed < interval - 1 || uploading) {
+      frameId = requestAnimationFrame(frame);
+      return;
+    }
+    lastFrame = now;
+    const started = performance.now();
     const moving = pointer.inside && now - pointer.lastMove < 70;
     if (!moving) {
       pointer.vx *= 0.85;
       pointer.vy *= 0.85;
     }
-    const target = !pointer.inside ? 0 : moving ? 1 : 0.1;
+    const target = moving ? 1 : 0;
     state.strength += (target - state.strength) * (target > state.strength ? 0.22 : 0.05);
     state.x += (pointer.x - state.x) * 0.35;
     state.y += (pointer.y - state.y) * 0.35;
@@ -4108,46 +4181,57 @@ function meltedGlassScript(): string {
       const dx = state.x - pointer.drawX;
       const dy = state.y - pointer.drawY;
       const distance = Math.hypot(dx, dy);
-      const steps = Math.floor(distance / STAMP_STEP);
+      const steps = Math.min(12, Math.floor(distance / STAMP_STEP));
       for (let s = 1; s <= steps; s++) stamp(pointer.drawX + dx * s / steps, pointer.drawY + dy * s / steps, 1);
       if (steps) {
         pointer.drawX = state.x;
         pointer.drawY = state.y;
       }
     }
-    const energy = melt();
+    const energy = melt(elapsed);
     const stretch = 1 + Math.min(state.speed / 40, 1) * 0.35;
     const amp = state.strength * (1 + state.speed * 0.012);
     compose(amp, stretch);
 
-    const fingerSettled = !moving && Math.abs(target - state.strength) < 0.002 && state.speed < 0.05 && Math.abs(pointer.x - state.x) < 0.3 && Math.abs(pointer.y - state.y) < 0.3;
-    if (fingerSettled && energy < 0.004) {
-      // Flat glass shows nothing: drop the full-screen filter instead of re-running it on every repaint.
-      field.fill(0);
-      filterOff();
-      running = false;
-      return;
+    // A sustained miss of the budget first reduces cadence, then keeps the static CRT.
+    if (elapsed > interval * 1.8 || performance.now() - started > 12) slowFrames++;
+    else slowFrames = Math.max(0, slowFrames - 1);
+    if (slowFrames >= 8) {
+      slowFrames = 0;
+      if (interval < 50) interval = 50;
+      else { root.classList.add("cs-lite"); stop(); return; }
     }
-    window.requestAnimationFrame(frame);
+    if (!moving && state.strength < 0.002 && energy < 0.004) { stop(); return; }
+    frameId = requestAnimationFrame(frame);
   };
 
   const wake = () => {
-    if (running || calm()) return;
+    if (running || calm() || document.hidden || performance.now() < scrollingUntil) return;
     running = true;
-    window.requestAnimationFrame(frame);
+    frameId = requestAnimationFrame(frame);
   };
 
   resize();
   window.addEventListener("resize", () => {
+    stop();
+    if (oversized()) { root.classList.add("cs-lite"); return; }
     resize();
-    wake();
   });
+  window.addEventListener("scroll", () => {
+    scrollingUntil = performance.now() + 180;
+    stop();
+  }, { passive: true });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); });
+  window.addEventListener("pagehide", stop);
+  new MutationObserver(() => { if (calm()) stop(); })
+    .observe(root, { attributes: true, attributeFilter: ["class"] });
 
   window.addEventListener("pointermove", event => {
+    if (calm() || document.hidden || performance.now() < scrollingUntil) return;
     if (event.pointerType && event.pointerType !== "mouse" && event.pointerType !== "pen") return;
     const x = event.clientX;
     const y = event.clientY;
-    if (!pointer.inside && state.strength < 0.01) {
+    if (!pointer.inside) {
       state.x = pointer.x = pointer.drawX = x;
       state.y = pointer.y = pointer.drawY = y;
     }
@@ -4160,10 +4244,7 @@ function meltedGlassScript(): string {
     wake();
   }, { passive: true });
 
-  document.documentElement.addEventListener("mouseleave", () => {
-    pointer.inside = false;
-    wake();
-  });
+  root.addEventListener("mouseleave", stop);
 })();
 </script>`;
 }
