@@ -2767,20 +2767,6 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
           repeating-linear-gradient(90deg, oklch(81% 0.21 152 / 0.07) 0 1px, transparent 1px 4px),
           radial-gradient(circle at 2.5px 2.5px, oklch(81% 0.21 152 / 0.045) 0 1px, transparent 1.5px) 0 0 / 4px 4px;
       }
-      .crt::after {
-        content: "";
-        position: absolute;
-        left: 0;
-        right: 0;
-        top: 0;
-        height: 34vh;
-        background: linear-gradient(180deg, transparent, oklch(81% 0.21 152 / 0.045) 55%, oklch(90% 0.18 150 / 0.07) 62%, transparent);
-        animation: crt-roll 9s linear infinite;
-      }
-      @keyframes crt-roll {
-        from { transform: translateY(-40vh); }
-        to { transform: translateY(110vh); }
-      }
       @keyframes crt-flicker {
         0%, 100% { opacity: 1; }
         41% { opacity: 0.94; }
