@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-9izAy4IeG8W9J056SCwghbURku2R78p9Y0UrXYcEHD4=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-QZ8kB74Y7Wer5Y4gWqdD2+mGKt5o6y9kzP2L24KARLw=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-yAhnd5A08Hmg46T/DeLZpxUKm/aIAraDagahckopkoI=' 'sha256-6lByopFgpfT2FePkqXJ7fprpxz/Zx85OAOgzGg851wQ=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-iXNdAZUnNPTTN8ntUFTlBOwM/JD4+oYCd55PzAQp7vE=' 'sha256-T+cXGHgKoO0akuDnpFZFE1ONtL1SvJa4xle45q5olMA=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk=' 'sha256-gHlkWa1i2UkQ8DWMgfDzIz8zXAQjFnYQ2U1Jv9LJ6zQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -1962,13 +1962,6 @@ async function homePage(env: Env): Promise<string> {
           </div>
           <div class="actions">
             <a class="button primary" data-ios-only href="${escapeAttribute(links.appStoreUrl)}" rel="noreferrer">Download on the App Store</a>
-            <a class="button" href="/support">Support</a>
-            <a class="button ghost" href="/transparency">Transparency</a>
-            <a class="button ghost" href="${escapeAttribute(links.githubUrl)}" rel="noreferrer">GitHub</a>
-            <a class="button ghost" href="${escapeAttribute(links.xUrl)}" rel="noreferrer">X</a>
-          </div>
-          <div class="sponsor-cta" aria-label="Sponsor the project">
-            <iframe src="https://github.com/sponsors/DomenicoDD/button" title="Sponsor DomenicoDD" height="32" width="114" loading="lazy"></iframe>
           </div>
         </div>
       </section>
@@ -2378,6 +2371,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     <meta name="cryptoscreen-web-url" content="${escapeAttribute(messageLinks.webUrl)}">
     ${smartAppBannerMeta(env, messageLinks)}` : ""}
     ${fragmentForwardingScript()}
+    ${CALM_GATE_SCRIPT}
     ${intro ? INTRO_GATE_SCRIPT : ""}
     <meta name="description" content="${escapeAttribute(description)}">
     <meta name="theme-color" content="#08100b">
@@ -2537,6 +2531,43 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       @keyframes bl-reveal { from { transform: scaleY(0); } to { transform: scaleY(1); } }
       @keyframes bl-scan-in { from { opacity: 0; } to { opacity: 0.85; } }
       @keyframes bl-scan-move { from { transform: translateY(150px); } to { transform: translateY(835px); } }
+
+      /* Accessibility: calm mode switches off every motion, distortion and screen effect. */
+      html.cs-calm *, html.cs-calm *::before, html.cs-calm *::after { animation: none !important; transition: none !important; }
+      html.cs-calm .crt, html.cs-calm .crt-grid, html.cs-calm .melted-glass, html.cs-calm .intro { display: none !important; }
+      html.cs-calm .rv { opacity: 1; transform: none; }
+      html.cs-calm .cipher-c.is-wait, html.cs-calm .cipher-c.is-scramble { color: inherit; text-shadow: inherit; }
+      html.cs-calm .cipher-c.is-scramble::after { content: none; }
+      html.cs-calm .brand-logo .bl-scan-wrap { display: none; }
+      html.cs-calm { scroll-behavior: auto; }
+      html.cs-calm.cs-intro { overflow: auto; }
+      html.cs-calm .brand .brand-logo { visibility: visible; }
+      .calm-toggle {
+        position: fixed;
+        right: calc(16px + env(safe-area-inset-right, 0px));
+        bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        z-index: 70;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 14px 9px 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: oklch(9% 0.016 154 / 0.86);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        box-shadow: 0 10px 30px -14px oklch(0% 0 0 / 0.9);
+        color: var(--soft-ink);
+        font: 500 13px/1 var(--mono);
+        cursor: pointer;
+      }
+      .calm-toggle:hover { border-color: var(--accent-line); color: var(--ink); }
+      .calm-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+      .calm-toggle svg { width: 18px; height: 18px; flex: none; }
+      .calm-toggle .calm-state { color: var(--quiet); }
+      .calm-toggle[aria-pressed="true"] { border-color: var(--accent-line); color: var(--ink); }
+      .calm-toggle[aria-pressed="true"] .calm-state { color: var(--accent); }
+      @media print { .calm-toggle { display: none; } }
 
       /* Homepage intro: the app's launch sequence, once per browser session. The head script adds
          html.cs-intro before first paint; without it the overlay never shows. Sits under the CRT layers. */
@@ -3291,6 +3322,8 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     ${meltedGlassScript()}
     ${BRAND_LOGO_LOADED_SCRIPT}
     ${intro ? INTRO_SCRIPT : ""}
+    ${CALM_TOGGLE_MARKUP}
+    ${CALM_TOGGLE_SCRIPT}
     <div class="crt-grid" aria-hidden="true"></div>
     <div class="crt" aria-hidden="true"></div>
   </body>
@@ -3457,6 +3490,45 @@ const BRAND_LOGO_LOADED_SCRIPT = `<script>
 })();
 </script>`;
 
+// Accessibility: a floating switch that turns off every motion and distortion effect, remembered
+// in this browser. The head script applies it before first paint so nothing starts moving.
+const CALM_GATE_SCRIPT = `<script>
+(() => {
+  try {
+    if (localStorage.getItem("cs-calm") === "1") document.documentElement.classList.toggle("cs-calm", true);
+  } catch (error) {}
+})();
+</script>`;
+
+const CALM_TOGGLE_MARKUP = `<button class="calm-toggle" type="button" data-calm-toggle aria-pressed="false" title="Turn off motion and screen effects">` +
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="1.8"/><path d="M5 8.5l7 1.5 7-1.5M12 10v4.5M12 14.5l-3 6M12 14.5l3 6"/></svg>` +
+  `Accessibility <span class="calm-state" data-calm-state>effects on</span></button>`;
+
+const CALM_TOGGLE_SCRIPT = `<script>
+(() => {
+  const button = document.querySelector("[data-calm-toggle]");
+  if (!button) return;
+  const root = document.documentElement;
+  const label = button.querySelector("[data-calm-state]");
+  const sync = () => {
+    const calm = root.classList.contains("cs-calm");
+    button.setAttribute("aria-pressed", calm ? "true" : "false");
+    if (label) label.textContent = calm ? "effects off" : "effects on";
+  };
+  sync();
+  button.addEventListener("click", () => {
+    const calm = !root.classList.contains("cs-calm");
+    root.classList.toggle("cs-calm", calm);
+    try {
+      localStorage.setItem("cs-calm", calm ? "1" : "0");
+    } catch (error) {}
+    sync();
+    // Effects that were never started stay off; turning them back on restarts them cleanly.
+    if (!calm) window.location.reload();
+  });
+})();
+</script>`;
+
 const INTRO_MARKUP = `<div class="intro" data-intro aria-hidden="true">` +
   `<div class="intro-backdrop" data-intro-backdrop></div><div class="intro-power" data-intro-power></div>` +
   `${INTRO_LOGO_SVG}<div class="intro-word" data-intro-word></div>` +
@@ -3468,6 +3540,7 @@ const INTRO_GATE_SCRIPT = `<script>
 (() => {
   try {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (localStorage.getItem("cs-calm") === "1") return;
     if (sessionStorage.getItem("cs-intro")) return;
     sessionStorage.setItem("cs-intro", "1");
     document.documentElement.classList.toggle("cs-intro", true);
@@ -3639,6 +3712,8 @@ function cipherScript(): string {
 (() => {
   if (typeof window.matchMedia !== "function" || typeof window.requestAnimationFrame !== "function" || typeof window.IntersectionObserver !== "function") return;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const calm = () => document.documentElement.classList.contains("cs-calm");
+  if (calm()) return;
 
   const GLYPHS = "abcdefghkmnopqrsuvwxyz0123456789#%*+=<>/?";
   const DIGITS = "0123456789";
@@ -3725,7 +3800,7 @@ function cipherScript(): string {
     if (job) jobs.set(el, job);
   }
 
-  const fades = Array.from(document.querySelectorAll("main article, .copy-stack > p, .security-list li, .link-list a, .toc a, .lede, .hero .actions, .sponsor-cta"));
+  const fades = Array.from(document.querySelectorAll("main article, .copy-stack > p, .security-list li, .link-list a, .toc a, .lede, .hero .actions"));
   for (const el of fades) el.classList.add("rv");
 
   const observer = new IntersectionObserver(entries => {
@@ -3752,6 +3827,7 @@ function cipherScript(): string {
   const hoverTargets = document.querySelectorAll("header nav a, .button, .link-list a, footer a");
   for (const el of hoverTargets) {
     const shuffle = () => {
+      if (calm()) return;
       const job = prepare(el);
       if (job) play(job, { step: 18, scramble: 260, maxSpread: 260 });
     };
@@ -3783,6 +3859,7 @@ function meltedGlassScript(): string {
   if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
   const brands = navigator.userAgentData && navigator.userAgentData.brands;
   if (!brands || !brands.some(b => /Chrom/.test(b.brand))) return;
+  const calm = () => document.documentElement.classList.contains("cs-calm");
 
   const CELL = 6;
   const SCALE = 42;
@@ -3883,8 +3960,7 @@ function meltedGlassScript(): string {
     feImage.setAttribute("height", h);
     feImage.setAttribute("x", String(-CELL / 2));
     feImage.setAttribute("y", String(-CELL / 2));
-    glass.style.backdropFilter = "none";
-    filterOn = false;
+    filterOff();
   };
 
   // Draw: a volume-preserving stamp, a groove where the cursor passes with glass pushed up beside it.
@@ -3934,7 +4010,15 @@ function meltedGlassScript(): string {
   let filterOn = false;
   let uploading = false;
   let dirty = false;
+  let mapUrl = null;
 
+  const filterOff = () => {
+    glass.style.backdropFilter = "none";
+    filterOn = false;
+  };
+
+  // The map goes to the filter as a short-lived blob URL. A data: URL per frame left every decoded
+  // frame in the image cache, so memory grew until the tab slowed down and reloaded.
   const upload = () => {
     if (uploading) {
       dirty = true;
@@ -3942,19 +4026,27 @@ function meltedGlassScript(): string {
     }
     dirty = false;
     ctx.putImageData(image, 0, 0);
-    const url = mapCanvas.toDataURL();
     uploading = true;
-    const preload = new Image();
-    preload.onload = preload.onerror = () => {
-      feImage.setAttribute("href", url);
-      uploading = false;
-      if (!filterOn) {
-        glass.style.backdropFilter = "url(#melted-glass)";
-        filterOn = true;
+    mapCanvas.toBlob(blob => {
+      if (!blob) {
+        uploading = false;
+        return;
       }
-      if (dirty) upload();
-    };
-    preload.src = url;
+      const url = URL.createObjectURL(blob);
+      const preload = new Image();
+      preload.onload = preload.onerror = () => {
+        feImage.setAttribute("href", url);
+        if (mapUrl) URL.revokeObjectURL(mapUrl);
+        mapUrl = url;
+        uploading = false;
+        if (!filterOn && running && !calm()) {
+          glass.style.backdropFilter = "url(#melted-glass)";
+          filterOn = true;
+        }
+        if (dirty) upload();
+      };
+      preload.src = url;
+    });
   };
 
   const compose = (amp, stretch) => {
@@ -4002,6 +4094,12 @@ function meltedGlassScript(): string {
   };
 
   const frame = now => {
+    if (calm()) {
+      field.fill(0);
+      filterOff();
+      running = false;
+      return;
+    }
     const moving = pointer.inside && now - pointer.lastMove < 70;
     if (!moving) {
       pointer.vx *= 0.85;
@@ -4038,12 +4136,9 @@ function meltedGlassScript(): string {
 
     const fingerSettled = !moving && Math.abs(target - state.strength) < 0.002 && state.speed < 0.05 && Math.abs(pointer.x - state.x) < 0.3 && Math.abs(pointer.y - state.y) < 0.3;
     if (fingerSettled && energy < 0.004) {
+      // Flat glass shows nothing: drop the full-screen filter instead of re-running it on every repaint.
       field.fill(0);
-      compose(amp, stretch);
-      if (!pointer.inside) {
-        glass.style.backdropFilter = "none";
-        filterOn = false;
-      }
+      filterOff();
       running = false;
       return;
     }
@@ -4051,7 +4146,7 @@ function meltedGlassScript(): string {
   };
 
   const wake = () => {
-    if (running) return;
+    if (running || calm()) return;
     running = true;
     window.requestAnimationFrame(frame);
   };
