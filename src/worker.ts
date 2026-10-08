@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-9izAy4IeG8W9J056SCwghbURku2R78p9Y0UrXYcEHD4=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-AXrg60nYxvfZ7Kt6d7GMI6/YnpFFU6gWKRLjC5bVzsA=' 'sha256-9izAy4IeG8W9J056SCwghbURku2R78p9Y0UrXYcEHD4=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-QZ8kB74Y7Wer5Y4gWqdD2+mGKt5o6y9kzP2L24KARLw=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk='; connect-src 'self'; manifest-src 'self'; frame-src https://github.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -2027,7 +2027,9 @@ async function homePage(env: Env): Promise<string> {
       </section>
     `,
     undefined,
-    homeStatsScript()
+    homeStatsScript(),
+    undefined,
+    true
   );
 }
 
@@ -2360,7 +2362,7 @@ function notFoundPage(env: Env): string {
 
 type MessagePageLinks = { appUrl: string; webUrl: string; clipPage: boolean; appClipBanner: boolean };
 
-function pageShell(title: string, env: Env, content: string, preserveFragment = false, bodyScript = "", messageLinks?: MessagePageLinks): string {
+function pageShell(title: string, env: Env, content: string, preserveFragment = false, bodyScript = "", messageLinks?: MessagePageLinks, intro = false): string {
   const escapedTitle = escapeHtml(title);
   const description = "Send one-time encrypted messages from iPhone. Read in the app or, when the sender allows it, in a web browser. Decrypt locally with a link and PIN.";
   const links = siteLinks(env);
@@ -2376,6 +2378,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     <meta name="cryptoscreen-web-url" content="${escapeAttribute(messageLinks.webUrl)}">
     ${smartAppBannerMeta(env, messageLinks)}` : ""}
     ${fragmentForwardingScript()}
+    ${intro ? INTRO_GATE_SCRIPT : ""}
     <meta name="description" content="${escapeAttribute(description)}">
     <meta name="theme-color" content="#08100b">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
@@ -2534,6 +2537,38 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       @keyframes bl-reveal { from { transform: scaleY(0); } to { transform: scaleY(1); } }
       @keyframes bl-scan-in { from { opacity: 0; } to { opacity: 0.85; } }
       @keyframes bl-scan-move { from { transform: translateY(150px); } to { transform: translateY(835px); } }
+
+      /* Homepage intro: the app's launch sequence, once per browser session. The head script adds
+         html.cs-intro before first paint; without it the overlay never shows. Sits under the CRT layers. */
+      .intro { display: none; }
+      html.cs-intro { overflow: hidden; }
+      html.cs-intro .intro {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: block;
+        cursor: pointer;
+        background: radial-gradient(120% 70% at 46% 38%, #062b1d 0%, #021a0e 45%, #000f07 100%);
+        /* Failsafe: never trap the page if the script cannot run. */
+        animation: intro-failsafe 0s linear 9s forwards;
+      }
+      html.cs-intro .brand .brand-logo { visibility: hidden; }
+      @keyframes intro-failsafe { to { opacity: 0; visibility: hidden; pointer-events: none; } }
+      .intro-backdrop { position: absolute; inset: 0; background: inherit; }
+      .intro-power { position: absolute; left: 0; right: 0; top: 50%; height: 2px; margin-top: -1px; background: #d9ffe9; box-shadow: 0 0 18px 4px oklch(81% 0.21 152 / 0.7), 0 0 60px 10px oklch(81% 0.21 152 / 0.35); opacity: 0; transform: scaleX(0); }
+      .intro-logo { position: fixed; left: 50%; top: 38%; width: min(200px, 46vw); height: min(200px, 46vw); margin: calc(min(200px, 46vw) / -2) 0 0 calc(min(200px, 46vw) / -2); overflow: visible; transform-origin: 0 0; }
+      .intro-logo .bl-cells rect { transform-box: fill-box; transform-origin: center; fill: var(--c); opacity: 0; }
+      .intro-logo .bl-tile, .intro-logo .bl-feather, .intro-logo .bl-reveal { transform-box: fill-box; }
+      .intro-logo .bl-tile { transform-origin: center; opacity: 0; }
+      .intro-logo .bl-feather { transform-origin: 20% 90%; opacity: 0; }
+      .intro-logo .bl-reveal { transform-origin: top; transform: scaleY(0); }
+      .intro-logo .bl-scan { opacity: 0; }
+      .intro-logo .bl-glyphs text { font: 600 34px var(--mono); fill: var(--accent); text-anchor: middle; dominant-baseline: central; filter: drop-shadow(0 0 10px oklch(81% 0.21 152 / 0.85)); }
+      .intro-word { position: absolute; left: 0; right: 0; top: calc(38% + min(200px, 46vw) / 2 + 38px); text-align: center; font-family: var(--display); font-size: clamp(28px, 7vw, 40px); font-weight: 500; color: #fff; text-shadow: 0 0 14px oklch(81% 0.21 152 / 0.18); white-space: pre; }
+      .intro-progress { position: absolute; left: 50%; top: calc(38% + min(200px, 46vw) / 2 + 102px); display: flex; gap: 4px; transform: translateX(-50%); opacity: 0; }
+      .intro-progress i { width: 9px; height: 9px; border-radius: 1.5px; background: oklch(70% 0.12 152 / 0.16); }
+      .intro-progress i.on { background: #5fbd86; box-shadow: 0 0 8px oklch(81% 0.21 152 / 0.6); }
+      .intro-status { position: absolute; left: 0; right: 0; top: calc(38% + min(200px, 46vw) / 2 + 124px); text-align: center; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: oklch(80% 0.1 152 / 0.55); opacity: 0; }
       header nav {
         display: flex;
         flex-wrap: wrap;
@@ -3222,6 +3257,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     </style>
   </head>
   <body>
+    ${intro ? INTRO_MARKUP : ""}
     <div class="wrap">
       <header>
         <a class="brand" href="/">${BRAND_LOGO_SVG}cryptoscreen</a>
@@ -3254,6 +3290,7 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
     ${cipherScript()}
     ${meltedGlassScript()}
     ${BRAND_LOGO_LOADED_SCRIPT}
+    ${intro ? INTRO_SCRIPT : ""}
     <div class="crt-grid" aria-hidden="true"></div>
     <div class="crt" aria-hidden="true"></div>
   </body>
@@ -3334,7 +3371,7 @@ function homeStatsScript(): string {
 // Cells carry their colour, final opacity and animation delay so the intro runs in pure CSS:
 // it starts with first paint and still ends on the finished logo without JavaScript or with
 // reduced motion. Mirrors CSLogo in the app's CryptoscreenLogo.swift.
-const BRAND_LOGO_SVG = (() => {
+function brandLogoSvg(className: string, id: string): string {
   const green = "#5fbd86", light = "#64b686", dark = "#2f8954", deep = "#0d4725";
   type Cell = [number, number, string, number];
   const lock: Cell[] = [
@@ -3389,20 +3426,27 @@ const BRAND_LOGO_SVG = (() => {
 
   const feather = "M110.416 501.481C101.826 518.037 15.1138 660.776 34.9355 674.851C54.7573 688.925 59.4133 667.17 63.2562 659.584C78.4411 629.606 106.675 569.814 127.869 545.853C146.935 524.299 181.654 499.033 217.158 477.429C204.499 477.318 195.142 480.622 173.851 477.049C224.84 461.99 325.383 402.838 340.213 383.328C331.522 386.638 295.546 387.677 272.269 382.731C286.933 382.183 340.397 362.307 363.374 353.499C377.886 335.238 385.419 320.435 392.75 300.074C386.063 302.724 343.833 316.681 313.233 310.994C329.89 311.141 397.982 280.892 407.82 258.508C442.228 180.225 515.177 81.1608 555.067 37.0224C574.222 15.8268 477.22 30.0845 373.196 100.025C302.029 147.874 242.894 199.333 191.792 279.81C140.691 360.287 143.952 430.888 143.878 439.3C143.804 447.712 143.23 449.133 141.029 444.265C138.827 439.398 134.472 426.649 129.156 399.283C127.443 402.69 121.22 419.639 121.102 433.05C120.985 446.461 123.324 476.605 110.416 501.481Z";
 
-  return `<svg class="brand-logo" viewBox="0 0 999 999" aria-hidden="true" focusable="false">` +
+  return `<svg class="${className}" viewBox="0 0 999 999" aria-hidden="true" focusable="false">` +
     `<defs>` +
-    `<radialGradient id="bl-tile" cx="0.42" cy="0.62" r="0.62"><stop offset="0" stop-color="#062b1d"/><stop offset="1" stop-color="#001107"/></radialGradient>` +
-    `<linearGradient id="bl-feather" x1="187.87" y1="265.91" x2="379.01" y2="383.67" gradientUnits="userSpaceOnUse"><stop offset="0.09" stop-color="#eafff3"/><stop offset="0.32" stop-color="#fff"/><stop offset="0.84" stop-color="#d5f7ee"/></linearGradient>` +
-    `<mask id="bl-reveal" maskUnits="userSpaceOnUse" x="0" y="0" width="999" height="999"><g transform="rotate(-38 500 500)"><rect class="bl-reveal" x="-400" y="-800" width="1800" height="2000" fill="#fff"/></g></mask>` +
+    `<radialGradient id="${id}-tile" cx="0.42" cy="0.62" r="0.62"><stop offset="0" stop-color="#062b1d"/><stop offset="1" stop-color="#001107"/></radialGradient>` +
+    `<linearGradient id="${id}-feather" x1="187.87" y1="265.91" x2="379.01" y2="383.67" gradientUnits="userSpaceOnUse"><stop offset="0.09" stop-color="#eafff3"/><stop offset="0.32" stop-color="#fff"/><stop offset="0.84" stop-color="#d5f7ee"/></linearGradient>` +
+    `<linearGradient id="${id}-shine" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>` +
+    `<clipPath id="${id}-clip"><path transform="translate(218 139)" d="${feather}"/></clipPath>` +
+    `<mask id="${id}-reveal" maskUnits="userSpaceOnUse" x="0" y="0" width="999" height="999"><g transform="rotate(-38 500 500)"><rect class="bl-reveal" x="-400" y="-800" width="1800" height="2000" fill="#fff"/></g></mask>` +
     `</defs>` +
-    `<rect class="bl-tile" width="999" height="999" rx="220" fill="url(#bl-tile)" stroke="#7affb3" stroke-opacity="0.12" stroke-width="6"/>` +
+    `<rect class="bl-tile" width="999" height="999" rx="220" fill="url(#${id}-tile)" stroke="#7affb3" stroke-opacity="0.12" stroke-width="6"/>` +
     `<g class="bl-cells">${bodyCells}${cells(lock)}</g>` +
-    `<g class="bl-feather" style="filter:drop-shadow(8px 12px 20px rgb(0 39 16 / 0.6))"><g mask="url(#bl-reveal)"><path fill="url(#bl-feather)" transform="translate(218 139)" d="${feather}"/></g></g>` +
+    `<g class="bl-feather" style="filter:drop-shadow(8px 12px 20px rgb(0 39 16 / 0.6))"><g mask="url(#${id}-reveal)"><path fill="url(#${id}-feather)" transform="translate(218 139)" d="${feather}"/>` +
+    `<g clip-path="url(#${id}-clip)"><g transform="rotate(28 300 380)"><rect class="bl-shine" x="-200" y="0" width="140" height="760" fill="url(#${id}-shine)" opacity="0"/></g></g></g></g>` +
     `<g class="bl-cells">${cells(bottomRow)}</g>` +
     `<g class="bl-cells" style="filter:drop-shadow(-10px 13px 10px rgb(4 74 33 / 0.31))">${cells(shackleRight)}</g>` +
+    `<g class="bl-glyphs"></g>` +
     `<g class="bl-scan-wrap"><rect class="bl-scan" x="70" y="0" width="859" height="16" rx="8" fill="#7affb3"/></g>` +
     `</svg>`;
-})();
+}
+
+const BRAND_LOGO_SVG = brandLogoSvg("brand-logo", "bl");
+const INTRO_LOGO_SVG = brandLogoSvg("intro-logo", "il");
 
 // Marks the page as loaded so the header logo stops its scan line. Static so its CSP hash is stable.
 const BRAND_LOGO_LOADED_SCRIPT = `<script>
@@ -3410,6 +3454,183 @@ const BRAND_LOGO_LOADED_SCRIPT = `<script>
   const loaded = () => document.documentElement.classList.toggle("cs-loaded", true);
   if (document.readyState === "complete") loaded();
   else window.addEventListener("load", loaded);
+})();
+</script>`;
+
+const INTRO_MARKUP = `<div class="intro" data-intro aria-hidden="true">` +
+  `<div class="intro-backdrop" data-intro-backdrop></div><div class="intro-power" data-intro-power></div>` +
+  `${INTRO_LOGO_SVG}<div class="intro-word" data-intro-word></div>` +
+  `<div class="intro-progress" data-intro-progress>${"<i></i>".repeat(12)}</div><div class="intro-status" data-intro-status>sealing channel</div>` +
+  `</div>`;
+
+// Runs before first paint on the homepage: plays the intro once per session, never with reduced motion.
+const INTRO_GATE_SCRIPT = `<script>
+(() => {
+  try {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (sessionStorage.getItem("cs-intro")) return;
+    sessionStorage.setItem("cs-intro", "1");
+    document.documentElement.classList.toggle("cs-intro", true);
+  } catch (error) {}
+})();
+</script>`;
+
+// The homepage intro sequence. Mirrors CryptoscreenSplashView in the app; times are in ms.
+const INTRO_SCRIPT = `<script>
+(() => {
+  const root = document.documentElement;
+  const intro = document.querySelector("[data-intro]");
+  if (!intro) return;
+  const end = () => { root.classList.toggle("cs-intro", false); intro.remove(); };
+  if (!root.classList.contains("cs-intro") || typeof intro.animate !== "function") { end(); return; }
+
+  const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+  const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+-/<>[]{}";
+  const pick = () => GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+  const NS = "http://www.w3.org/2000/svg";
+  const logo = intro.querySelector(".intro-logo");
+  const q = selector => intro.querySelector(selector);
+  const anim = (el, frames, options) => el.animate(frames, { fill: "both", easing: EASE, ...options });
+  const timers = [];
+  const later = (ms, fn) => timers.push(window.setTimeout(fn, ms));
+  let finished = false;
+  let loaded = document.readyState === "complete";
+  window.addEventListener("load", () => { loaded = true; });
+
+  // Shared cipher loop: glyphs change every 55 ms, as in the site's headings and the app.
+  const cipher = items => {
+    let origin = 0;
+    const frame = now => {
+      if (!origin) origin = now;
+      const t = now - origin;
+      let pending = 0;
+      for (const item of items) {
+        if (item.done) continue;
+        if (t < item.start) { pending++; continue; }
+        if (t >= item.end) { item.done = true; item.finish(); continue; }
+        pending++;
+        if (t - (item.tick || -99) > 55) { item.tick = t; item.glyph(pick()); }
+      }
+      if (pending && !finished) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  };
+
+  // 1. CRT power-on
+  anim(q("[data-intro-power]"), [
+    { opacity: 1, transform: "scaleX(0)" },
+    { opacity: 1, transform: "scaleX(1)", offset: 0.55 },
+    { opacity: 0, transform: "scaleX(1) scaleY(40)" }
+  ], { duration: 380, easing: "ease-out" });
+  anim(q("[data-intro-backdrop]"), [{ filter: "brightness(0)" }, { filter: "brightness(1.6)", offset: 0.5 }, { filter: "brightness(1)" }], { duration: 620, delay: 120, easing: "ease-out" });
+
+  // 2. Tile
+  anim(q(".bl-tile"), [{ opacity: 0, transform: "scale(0.92)" }, { opacity: 1, transform: "scale(1)" }], { duration: 640, delay: 520 });
+
+  // 3. Pixels decrypt; the body fades along its diagonal. Each cell's --d is when it settles.
+  const glyphLayer = q(".bl-glyphs");
+  const items = [];
+  for (const rect of logo.querySelectorAll(".bl-cells rect")) {
+    const style = rect.style;
+    const opacity = Number(style.getPropertyValue("--o"));
+    const delay = parseFloat(style.getPropertyValue("--d"));
+    if (rect.classList.contains("b")) {
+      rect.animate([{ opacity: 0 }, { opacity }], { duration: 420, delay, easing: "ease-out", fill: "both" });
+      continue;
+    }
+    const text = document.createElementNS(NS, "text");
+    text.setAttribute("x", Number(rect.getAttribute("x")) + 18);
+    text.setAttribute("y", Number(rect.getAttribute("y")) + 18);
+    glyphLayer.appendChild(text);
+    items.push({
+      start: delay - 260, end: delay,
+      glyph: g => { text.textContent = g; },
+      finish: () => {
+        text.remove();
+        rect.animate([
+          { opacity: 0, transform: "scale(0.4)", fill: "#d9ffe9" },
+          { opacity: Math.min(1, opacity + 0.25), transform: "scale(1.12)", fill: "#d9ffe9", offset: 0.6 },
+          { opacity, transform: "scale(1)", fill: style.getPropertyValue("--c") }
+        ], { duration: 260, easing: EASE, fill: "both" });
+      }
+    });
+  }
+  cipher(items);
+
+  // 4. Feather writes in, then a glint crosses it
+  anim(q(".bl-feather"), [{ opacity: 0, transform: "translate(140px, -170px) rotate(-14deg)" }, { opacity: 1, transform: "none" }], { duration: 650, delay: 1150 });
+  anim(q(".bl-reveal"), [{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], { duration: 560, delay: 1150, easing: "cubic-bezier(0.33, 1, 0.68, 1)" });
+  anim(q(".bl-shine"), [{ opacity: 0, transform: "translateX(0)" }, { opacity: 0.9, offset: 0.3 }, { opacity: 0, transform: "translateX(820px)" }], { duration: 620, delay: 1800, easing: "ease-in-out" });
+
+  // 5. Wordmark resolves with the site's scramble
+  const word = q("[data-intro-word]");
+  const text = "cryptoscreen.app";
+  const spans = [...text].map(character => {
+    const span = document.createElement("span");
+    span.className = "cipher-c is-wait";
+    span.textContent = character;
+    word.appendChild(span);
+    return span;
+  });
+  later(1700, () => cipher(spans.map((span, i) => {
+    const start = i * 70;
+    return {
+      start, end: start + 760 * (0.55 + Math.random() * 0.6),
+      glyph: g => { span.className = "cipher-c is-scramble"; span.setAttribute("data-g", g); },
+      finish: () => { span.className = ""; }
+    };
+  })));
+
+  // 6. Loading: scan line sweeps the icon while twelve cells fill; holds until the page has loaded
+  const scan = q(".bl-scan");
+  const progress = [...intro.querySelectorAll("[data-intro-progress] i")];
+  const status = q("[data-intro-status]");
+  later(2500, () => {
+    if (finished) return;
+    scan.animate([{ opacity: 0 }, { opacity: 0.85 }], { duration: 240, fill: "forwards" });
+    scan.animate([{ transform: "translateY(150px)" }, { transform: "translateY(835px)" }], { duration: 1050, easing: "ease-in-out", iterations: Infinity, direction: "alternate" });
+    anim(q("[data-intro-progress]"), [{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
+    anim(status, [{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
+    let lit = 0;
+    const fill = () => {
+      if (finished) return;
+      if (lit < progress.length && (loaded || lit < 8)) progress[lit++].className = "on";
+      if (lit === 5) status.textContent = "verifying device";
+      if (lit === 10) status.textContent = "ready";
+      if (lit < progress.length) later(lit < 8 ? 95 : 140, fill);
+      else later(160, exit);
+    };
+    fill();
+  });
+
+  // 7. Land in the header logo
+  function exit() {
+    if (finished) return;
+    finished = true;
+    timers.forEach(id => window.clearTimeout(id));
+    for (const el of [scan, q("[data-intro-progress]"), status, word]) {
+      el.animate([{ opacity: getComputedStyle(el).opacity }, { opacity: 0 }], { duration: 200, fill: "forwards" });
+    }
+    const target = document.querySelector(".brand .brand-logo");
+    const from = logo.getBoundingClientRect();
+    const to = target ? target.getBoundingClientRect() : from;
+    const scale = to.width / from.width;
+    logo.animate([
+      { transform: "translate(0, 0) scale(1)" },
+      { transform: "translate(" + (to.left - from.left) + "px, " + (to.top - from.top) + "px) scale(" + scale + ")" }
+    ], { duration: 640, delay: 140, easing: "cubic-bezier(0.65, 0, 0.2, 1)", fill: "forwards" });
+    q("[data-intro-backdrop]").animate([{ opacity: 1 }, { opacity: 1, offset: 0.6 }, { opacity: 0 }], { duration: 760, delay: 140, easing: "ease-in", fill: "forwards" });
+    window.setTimeout(end, 900);
+  }
+
+  intro.addEventListener("click", () => {
+    // Skip: settle everything now and land.
+    for (const a of logo.getAnimations({ subtree: true })) if (a.effect && a.effect.getTiming().iterations !== Infinity) a.finish();
+    for (const item of items) if (!item.done) { item.done = true; item.finish(); }
+    for (const a of logo.getAnimations({ subtree: true })) if (a.effect && a.effect.getTiming().iterations !== Infinity) a.finish();
+    word.textContent = text;
+    exit();
+  });
 })();
 </script>`;
 

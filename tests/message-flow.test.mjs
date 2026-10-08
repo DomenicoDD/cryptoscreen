@@ -119,6 +119,14 @@ for (const suffix of ['', '?clip=1']) {
     assert.ok(html.includes('noindex, nofollow, noarchive'));
   });
 }
+test('homepage intro scripts pass the actual CSP', async () => {
+  const response = await api.worker.fetch(new Request(env.WEB_BASE_URL + '/'), env);
+  const html = await response.text();
+  assert.ok(html.includes('data-intro'));
+  for (const script of scripts(html)) {
+    assert.ok(response.headers.get('Content-Security-Policy').includes("'sha256-" + createHash('sha256').update(script).digest('base64') + "'"));
+  }
+});
 test('iPhone browser fallback moves to www without sending or storing the fragment', async () => {
   const page = await browser(appURL, { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)' });
   assert.equal(page.redirected, webURL);
