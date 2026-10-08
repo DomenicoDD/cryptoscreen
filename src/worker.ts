@@ -139,7 +139,7 @@ let feedbackSchemaReady: Promise<void> | null = null;
 
 const securityHeaders = {
   "Content-Security-Policy":
-    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-p/cu4WRmo4TAkHdXlzLOEDtH9qPmmEJemgPMAM8pkdI=' 'sha256-+RY4XDwl+J7KAzZ6EeJi2DKTAdxsEbkbt48HhH0RIrY=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-tQVzJNpePIk/KfH+OJPj9OZdcrkPqQ57VLL0UygK5Mw=' 'sha256-PZlfPCbjh4Ng7Dq6+j7TXA9dt7rF8H68o7CkNIctWpk=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk=' 'sha256-gHlkWa1i2UkQ8DWMgfDzIz8zXAQjFnYQ2U1Jv9LJ6zQ=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-JOI6/yJJLtm/QmY+WuLhB89Wrhx/TJLpM/sMajiMIRc='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "default-src 'none'; img-src 'self' data: blob:; font-src 'self'; style-src 'unsafe-inline'; script-src 'sha256-HrYFR5j+vBEKTDeLEB2Vy6i4YI+pbde+obDT+swl/kQ=' 'sha256-oliIv0zqQdHHMPWskJbWG5lm6PIJ+qkHWklpPiGaIRg=' 'sha256-+RY4XDwl+J7KAzZ6EeJi2DKTAdxsEbkbt48HhH0RIrY=' 'sha256-Vd8aqtexkb3ZJJd7td5IdWDQ9b95BAdzVi96KuybVKA=' 'sha256-tQVzJNpePIk/KfH+OJPj9OZdcrkPqQ57VLL0UygK5Mw=' 'sha256-PZlfPCbjh4Ng7Dq6+j7TXA9dt7rF8H68o7CkNIctWpk=' 'sha256-mMZH4jcxBAKplISWgqvx+d14O9s6Eyfbl9wshC2zK+s=' 'sha256-4rSsmLijBV/jBt6u6o5OESRnoIjTPvybMKhNWS7OTPk=' 'sha256-j1sQnEbvRRTybrWkvQ1q5ZjJDzzAU1qNUVlsPyNwn+0=' 'sha256-TQfsZ0n4LVq4tZ9lksR1YHmLtsBlagJ7hYmgK82PjFg=' 'sha256-TIJ9ywLbyIhMghxqK9jCdIWezEHrBRbrsaYHoUherQY='; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
   "Referrer-Policy": "no-referrer",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
@@ -2582,7 +2582,27 @@ function pageShell(title: string, env: Env, content: string, preserveFragment = 
       .calm-toggle .calm-state { color: var(--quiet); }
       .calm-toggle[aria-pressed="true"] { border-color: var(--accent-line); color: var(--ink); }
       .calm-toggle[aria-pressed="true"] .calm-state { color: var(--accent); }
-      @media print { .calm-toggle { display: none; } }
+      .calm-notice {
+        position: fixed;
+        right: calc(16px + env(safe-area-inset-right, 0px));
+        bottom: calc(66px + env(safe-area-inset-bottom, 0px));
+        z-index: 70;
+        max-width: min(320px, calc(100vw - 32px));
+        margin: 0;
+        padding: 10px 14px;
+        border: 1px solid var(--accent-line);
+        border-radius: 14px;
+        background: oklch(9% 0.016 154 / 0.94);
+        box-shadow: 0 10px 30px -14px oklch(0% 0 0 / 0.9);
+        color: var(--ink);
+        font: 500 13px/1.4 var(--mono);
+        opacity: 0;
+        transform: translateY(6px);
+        pointer-events: none;
+        transition: opacity 240ms ease-out, transform 240ms ease-out;
+      }
+      .calm-notice.is-visible { opacity: 1; transform: none; }
+      @media print { .calm-toggle, .calm-notice { display: none; } }
 
       /* Homepage intro: the app's launch sequence, once per browser session. The head script adds
          html.cs-intro before first paint; without it the overlay never shows. Sits under the CRT layers. */
@@ -3496,25 +3516,29 @@ const BRAND_LOGO_LOADED_SCRIPT = `<script>
 const CONSOLE_ART_SCRIPT = `<script>
 (() => {
   const art = [
-    "          @@@@@@@@@@@",
-    "        @@@@       @@@@",
-    "       @@@           @@@",
-    "       @@@           @@@",
-    "       @@@           @@@                  ,       cryptoscreen",
-    "    @@@@@@@@@@@@@@@@@@@@@@@            ,/",
-    "    @@@@@@@@@@@@@@@@@@@@@@@          ,//          Messages you read once.",
-    "    @@@@@@@@@@   @@@@@@@@@@        ,///           Encrypted on your device, opened with a PIN,",
-    "    @@@@@@@@@     @@@@@@@@@      ,///             deleted from the server after one read.",
-    "    @@@@@@@@@@   @@@@@@@@@@    ,///",
-    "    @@@@@@@@@@@ @@@@@@@@@@@  ,///                 Curious how it works? Read the code:",
-    "    @@@@@@@@@@@ @@@@@@@@@@ ,///                   https://github.com/DomenicoDD/cryptoscreen",
-    "    @@@@@@@@@@@@@@@@@@@@@,///",
-    "    @@@@@@@@@@@@@@@@@@@,///                       Follow me on X:",
-    "                     ,///                         https://x.com/domenicodd",
-    "                    ///",
-    "                   /"
+    "                                                                                      ",
+    "                                                                                      ",
+    "              @@@@@@@@     ////                                                       ",
+    "            @@@@@@@@@@@//////         cryptoscreen                                    ",
+    "          @@@@      //@@@@/.                                                          ",
+    "        @@@@      //////@@@@          Messages you read once.                         ",
+    "        @@@@    ////////@@@@          Encrypted on your device, opened with a PIN,    ",
+    "        @@@@  //////////@@@@          deleted from the server after one read.         ",
+    "        @@@@ /////////  @@@@                                                          ",
+    "      @@@@@@//////////...             Curious how it works? Read the code:            ",
+    "      @@@@@//////// .::...            https://github.com/DomenicoDD/cryptoscreen      ",
+    "      @@@@:///////.:::::.                                                             ",
+    "      @@@@/////.:@::::::              Follow me on X:                                 ",
+    "      @@@////.:::::...    ..          https://x.com/domenicodd                        ",
+    "      @@//  ....@@                                                                    ",
+    "      ://                                                                             ",
+    "      // .                                                                            ",
+    "      /:@@@@::@@@@::@@::@@  ::                                                        ",
+    "                                                                                      ",
+    "                                                                                      "
   ];
-  console.log("%c" + art.join(String.fromCharCode(10)), "color:#7affb3;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.3");
+  // Own dark panel so it reads on both light and dark DevTools themes.
+  console.log("%c" + art.join(String.fromCharCode(10)), "color:#7affb3;background:#03140b;font-family:ui-monospace,Menlo,monospace;font-size:11px;line-height:1.3;padding:2px 0");
 })();
 </script>`;
 
@@ -3523,9 +3547,13 @@ const CONSOLE_ART_SCRIPT = `<script>
 const CALM_GATE_SCRIPT = `<script>
 (() => {
   const root = document.documentElement;
+  let autoOff = false;
   try {
     if (localStorage.getItem("cs-calm") === "1") root.classList.toggle("cs-calm", true);
+    // An automatic shutdown sticks for an hour, so every page does not re-test a struggling device.
+    autoOff = Date.now() - Number(localStorage.getItem("cs-auto-off") || 0) < 3600000;
   } catch (error) {}
+  if (autoOff) root.classList.add("cs-lite", "cs-auto-off");
   if (typeof window.matchMedia !== "function") return;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
   const constrained = window.matchMedia("(hover: none), (pointer: coarse)").matches ||
@@ -3533,7 +3561,7 @@ const CALM_GATE_SCRIPT = `<script>
     (navigator.deviceMemory > 0 && navigator.deviceMemory <= 4) ||
     !!(navigator.connection && navigator.connection.saveData);
   const sync = () => {
-    root.classList.toggle("cs-lite", constrained || reduced.matches);
+    root.classList.toggle("cs-lite", constrained || reduced.matches || autoOff);
     if (reduced.matches) root.classList.add("cs-calm");
   };
   sync();
@@ -3544,7 +3572,8 @@ const CALM_GATE_SCRIPT = `<script>
 
 const CALM_TOGGLE_MARKUP = `<button class="calm-toggle" type="button" data-calm-toggle aria-pressed="false" title="Turn off motion and screen effects">` +
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="1.8"/><path d="M5 8.5l7 1.5 7-1.5M12 10v4.5M12 14.5l-3 6M12 14.5l3 6"/></svg>` +
-  `Accessibility <span class="calm-state" data-calm-state>effects on</span></button>`;
+  `Accessibility <span class="calm-state" data-calm-state>effects on</span></button>` +
+  `<p class="calm-notice" data-calm-notice role="status" aria-live="polite"></p>`;
 
 const CALM_TOGGLE_SCRIPT = `<script>
 (() => {
@@ -3552,13 +3581,43 @@ const CALM_TOGGLE_SCRIPT = `<script>
   if (!button) return;
   const root = document.documentElement;
   const label = button.querySelector("[data-calm-state]");
+  const notice = document.querySelector("[data-calm-notice]");
+  const autoOff = () => root.classList.contains("cs-auto-off");
   const sync = () => {
-    const calm = root.classList.contains("cs-calm");
-    button.setAttribute("aria-pressed", calm ? "true" : "false");
-    if (label) label.textContent = calm ? "effects off" : "effects on";
+    const off = root.classList.contains("cs-calm") || autoOff();
+    button.setAttribute("aria-pressed", off ? "true" : "false");
+    button.title = autoOff() ? "Effects were turned off to keep your computer cool. Turn them back on" : off ? "Turn motion and screen effects back on" : "Turn off motion and screen effects";
+    if (label) label.textContent = off ? "effects off" : "effects on";
   };
   sync();
+
+  // The page drops to lite mode by itself when this device cannot keep up. Lite mode that is
+  // already set at startup (touch, small devices) is expected; one that appears later is a shutdown.
+  let wasLite = root.classList.contains("cs-lite");
+  if (typeof MutationObserver === "function") new MutationObserver(() => {
+    const lite = root.classList.contains("cs-lite");
+    if (lite && !wasLite && !root.classList.contains("cs-calm") && !autoOff()) {
+      root.classList.add("cs-auto-off");
+      try { localStorage.setItem("cs-auto-off", String(Date.now())); } catch (error) {}
+      sync();
+      if (notice) {
+        notice.textContent = "It seems we were burning your PC, so we turned the effects off.";
+        notice.classList.add("is-visible");
+        window.setTimeout(() => notice.classList.remove("is-visible"), 7000);
+      }
+    }
+    wasLite = lite;
+  }).observe(root, { attributes: true, attributeFilter: ["class"] });
+
   button.addEventListener("click", () => {
+    if (autoOff()) {
+      try {
+        localStorage.removeItem("cs-auto-off");
+        localStorage.setItem("cs-calm", "0");
+      } catch (error) {}
+      window.location.reload();
+      return;
+    }
     const calm = !root.classList.contains("cs-calm");
     root.classList.toggle("cs-calm", calm);
     try {
